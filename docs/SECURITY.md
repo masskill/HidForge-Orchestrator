@@ -1,0 +1,31 @@
+# Безпека HidForge Orchestrator
+
+## Принципи
+1. **Жодних bypass-прапорців.** Адаптери ніколи не передають `--dangerously-skip-permissions`, `--yolo`, `--dangerously-bypass-approvals-and-sandbox`, `danger-full-access`, `--force`, `--trust`. Перевіряє тест `real adapters never emit permission-bypass flags`.
+2. **Розділення режимів**: `read-only` (Claude `--permission-mode plan`, Codex `--sandbox read-only`, agy `--mode plan`, Cursor `--mode ask`) і `workspace-write` (Claude `acceptEdits`, Codex `workspace-write`, agy `accept-edits --sandbox`). Привілейовані дії (push, deploy, видалення, зміни secrets/глобального середовища) оркестратор не виконує взагалі.
+3. **Без shell.** Усі процеси — `spawn(file, argv, { shell: false })`. Windows `.cmd`-шими розгортаються до `.exe`/`.js`; невідомий шим не запускається (захист від CVE-2024-27980 / ін'єкцій через cmd.exe).
+4. **Немає довіри до результату агента**: незалежні gate-и після кожного запуску — git-коміт змін оркестратором, перевірка `allowedPaths` (включно з `..` та абсолютними шляхами), маркери конфліктів, команди перевірки. Merge — лише після ручного `Approve & Merge`.
+5. **Команди перевірки** (`verifyCommands`):
+   - жорсткий deny-list, який **неможливо** дозволити через UI: `git push/reset/clean/checkout/rebase…`, `rm/del/rd/format`, `powershell/pwsh/cmd/bash/sh/wsl`, `curl/wget/Invoke-WebRequest`, `npm publish/login/token`, усе з `deploy`, будь-які shell-оператори `| & ; < > \` $(`;
+   - решта виконується **лише після явного дозволу користувача** для конкретного проєкту (`needs_user_input` → «Дозволити»); список зберігається в `projects.allowed_commands` і редагується в UI.
+6. **Секрети**: HidForge не читає й не зберігає токени, ключі чи cookies провайдерів — використовується штатна авторизація CLI. `checkAuth` для Claude читає лише булеве `loggedIn` з `claude auth status` (вивід з e-mail не зберігається). Журнали, evidence і diff проходять через `maskSecrets` (ключі `sk-…`, `ghp_…`, `AKIA…`, `xox…`, `AIza…`, `Bearer …`, `api_key=…`, `password=…`).
+7. **Локальний API**: слухає тільки `127.0.0.1`; перевірка заголовка `Host` (захист від DNS rebinding); усі не-GET запити вимагають `x-hidforge-token` (випадковий на кожен запуск, вбудовується в `index.html`), що змушує браузер робити CORS preflight, на який сервер не відповідає дозволом. Статика з CSP `default-src 'self'`. UI вставляє недовірений текст лише через `textContent`.
+8. **Ізоляція записів**: окремий git worktree на задачу поза репозиторієм користувача; один writer на workspace — обмеження первинного ключа в БД.
+9. **Завершення процесів**: `taskkill /PID <pid> /T /F` на Windows, kill групи процесів на POSIX; таймаут задачі й stall-таймаут (нема виводу N секунд).
+
+## Модель загроз (скорочено)
+
+| Загроза | Захист | Залишковий ризик |
+|---|---|---|
+| Prompt injection у README/коді змушує агента виконати шкідливу команду | Дозволи CLI не послаблюються; Claude headless відхиляє Bash без дозволу; Codex у sandbox | Залежить від sandbox-у конкретного CLI; agy `--sandbox` не перевірено щодо мережі |
+| Агент пише поза дозволеними шляхами | Gate `allowedPaths` до merge | Агент **може** записати файл поза worktree на диск (якщо CLI дозволяє) — gate бачить лише git-зміни у worktree. Захист — дозволи самого CLI |
+| Агент змінює `.gitignore`-файли (`.env`) | — | Gitignored-файли не потрапляють у diff і не мерджаться, але можуть бути змінені у worktree |
+| Шкідлива веб-сторінка викликає локальний API | Host-перевірка + токен + відсутність CORS | — |
+| Ін'єкція аргументів на Windows | Без shell, розгортання шимів, тест `spawnSafe passes tricky arguments verbatim` | — |
+| Перевикористання PID після перезавантаження ОС → вбивство чужого процесу при відновленні | Kill лише якщо запуск молодший за свій таймаут | Мала ймовірність; позначено `ponytail:` у коді |
+| Витік секретів у журналах | `maskSecrets` | Евристика; нестандартні формати секретів не маскуються |
+
+## Відомі обмеження
+- Codex на Windows: якість sandbox-у `workspace-write` залежить від версії Codex.
+- Cursor-адаптер не перевірено локально (CLI не встановлено).
+- Немає автентифікації користувачів — розраховано на одного локального користувача.

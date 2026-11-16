@@ -1,0 +1,21 @@
+{
+  "name": "hidforge-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Windows-first orchestrator for AI coding CLI agents",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env src/main.ts",
+    "demo": "node --env-file-if-exists=.env src/main.ts --demo",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc",
+    "test": "node --test --test-concurrency=1 \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

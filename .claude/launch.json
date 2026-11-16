@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "hidforge", "runtimeExecutable": "node", "runtimeArgs": ["--env-file-if-exists=.env", "src/main.ts"], "port": 4317 }
+  ]
+}

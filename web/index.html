@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="hidforge-token" content="__HIDFORGE_TOKEN__">
+  <title>HidForge Orchestrator</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <header class="top">
+    <strong class="brand">HidForge <span>Orchestrator</span></strong>
+    <div class="top-controls">
+      <label>Паралельно <select id="maxConc"></select></label>
+      <label>Автовибір <select id="routing">
+        <option value="cost-first">cost-first</option>
+        <option value="balanced">balanced</option>
+        <option value="quality-first">quality-first</option>
+      </select></label>
+      <select id="theme" title="Тема">
+        <option value="system">Тема: системна</option>
+        <option value="light">Світла</option>
+        <option value="dark">Темна</option>
+      </select>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <section>
+        <h3>Проєкти</h3>
+        <ul id="projects" class="list"></ul>
+        <form id="openRepo" class="stack">
+          <input id="repoPath" placeholder="Шлях до Git-репозиторію, напр. E:\code\app" required>
+          <button>Відкрити</button>
+        </form>
+        <button id="demoBtn" class="ghost">Створити демо-проєкт (Mock)</button>
+      </section>
+      <section>
+        <h3>Агенти <button id="refreshAgents" class="ghost small" title="Перевірити знову">↻</button></h3>
+        <ul id="agents" class="list agents"></ul>
+      </section>
+    </aside>
+    <main id="main">
+      <p class="muted pad">Оберіть або відкрийте проєкт ліворуч.</p>
+    </main>
+    <aside id="detail" class="detail hidden"></aside>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>
