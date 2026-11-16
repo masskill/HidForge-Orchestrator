@@ -8,7 +8,9 @@ import { openDb } from './db.ts';
 import { Store, Conflict, BadRequest, EDITABLE_FIELDS, type Task, type Project, type Run } from './store.ts';
 import { validateDeps, depsSatisfied } from './dag.ts';
 import { WorkspaceManager, inspectRepo, checkAllowedPaths, git } from './workspace.ts';
-import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, type RoutingPolicy } from './adapters/index.ts';
+import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, APP_PLUGINS_DIR, type RoutingPolicy } from './adapters/index.ts';
+import { loadPlugins, type PluginLoad } from './adapters/plugin.ts';
+import { WslAdapter, type WslConfig } from './adapters/wsl.ts';
 import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
 import { buildPrompt, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
@@ -39,6 +41,7 @@ export class Orchestrator {
   readonly ws: WorkspaceManager;
   readonly planner: Planner;
   readonly reviewer: Reviewer;
+  readonly pluginErrors: PluginLoad['errors'];
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -50,7 +53,13 @@ export class Orchestrator {
     this.opts = { maxConcurrent: 2, tickMs: 500, backoffMs: 5_000, stallTimeoutSec: 600, verifyTimeoutSec: 900, ...o, dataDir: path.resolve(o.dataDir) };
     mkdirSync(this.opts.dataDir, { recursive: true });
     this.store = new Store(openDb(path.join(this.opts.dataDir, 'hidforge.db')));
-    this.registry = new AgentRegistry(o.adapters ?? defaultAdapters());
+    // Agents: built-ins + JSON plugins (unless a test passes its own), plus WSL copies chosen in settings (applied on restart).
+    const plugins = o.adapters ? { adapters: [], errors: [] } : loadPlugins([APP_PLUGINS_DIR, path.join(this.opts.dataDir, 'plugins')]);
+    this.pluginErrors = plugins.errors;
+    const base = o.adapters ?? [...defaultAdapters(), ...plugins.adapters];
+    const wsl = this.store.getSetting<WslConfig | null>('wsl', null);
+    const viaWsl = wsl ? base.filter((a) => wsl.agents.includes(a.id) && !a.mock).map((a) => new WslAdapter(a, wsl.distro)) : [];
+    this.registry = new AgentRegistry([...base, ...viaWsl]);
     this.ws = new WorkspaceManager(path.join(this.opts.dataDir, 'worktrees'));
     this.planner = new Planner(this);
     this.reviewer = new Reviewer(this);

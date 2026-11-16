@@ -605,6 +605,7 @@ function settingsPage() {
     p ? reviewSettings(p) : null,
     trustSettings(),
     rolesSettings(),
+    agentsExtSettings(),
     maintenanceSettings(),
     aboutSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
@@ -626,6 +627,27 @@ function budgetSettings(p) {
       await reloadProject(); toast('Бюджет збережено', 'success'); render();
     }) }, 'Зберегти')));
 }
+/** JSON plugin adapters (read-only info) and the optional WSL2 backend. */
+function agentsExtSettings() {
+  const s = state.settings || {};
+  const distro = TextInput({ value: s.wsl?.distro || '', placeholder: 'напр. Ubuntu', 'aria-label': 'Дистрибутив WSL' });
+  const agents = TextInput({ value: (s.wsl?.agents || []).join(', '), placeholder: 'напр. claude, codex', 'aria-label': 'Агенти у WSL' });
+  const save = act(async () => {
+    const d = distro.value.trim();
+    await api('PUT', '/api/settings', { wsl: d ? { distro: d, agents: agents.value.split(/[\s,]+/).filter(Boolean) } : null });
+    await loadSettings(); toast('Збережено. Діє після перезапуску сервера', 'success'); render();
+  });
+  const plugins = (state.agents || []).filter((a) => a.notes?.some((n) => n.startsWith('JSON plugin')));
+  return PanelCard({ title: 'Плагіни агентів і WSL2', subtitle: 'Додаткові CLI без зміни коду; запуск агентів у дистрибутиві WSL (експериментально)' },
+    h('p', { class: 'text-2', style: 'margin:0;font-size:var(--fs-sm)' },
+      `JSON-плагіни: ${plugins.map((a) => a.id).join(', ') || 'немає'}. Власні специфікації кладіть у `, h('span', { class: 'mono' }, '%LOCALAPPDATA%\\HidForge\\plugins\\*.json'),
+      ' (формат — plugins\\gemini.json). Прапорці обходу дозволів і промпт в аргументах відхиляються при завантаженні. Діє після перезапуску.'),
+    h('div', { class: 'grid cols-2' },
+      Field('Дистрибутив WSL', distro, 'Порожньо — WSL не використовується'),
+      Field('Агенти у WSL', agents, 'З’являться як окремі агенти з суфіксом -wsl')),
+    h('div', {}, PrimaryButton({ icon: 'check', onClick: save }, 'Зберегти')));
+}
+
 const CHECK_TONE = { ok: 'success', info: 'neutral', warn: 'warning', error: 'danger' };
 const CHECK_LABEL = { ok: 'OK', info: 'інфо', warn: 'увага', error: 'помилка' };
 

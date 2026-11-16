@@ -1,0 +1,23 @@
+{
+  "id": "gemini",
+  "name": "Gemini CLI",
+  "bin": "gemini",
+  "verified": false,
+  "notes": [
+    "Headless: prompt via stdin (non-TTY), `--output-format stream-json`; write tasks `--approval-mode auto_edit`, read-only `--approval-mode plan` (google-gemini/gemini-cli docs/cli/cli-reference.md). `--yolo` / `--approval-mode yolo` are never used.",
+    "Auth uses the CLI's own login (`gemini` once interactively); HidForge cannot check it, so status shows auth: unknown."
+  ],
+  "args": {
+    "base": ["--output-format", "stream-json"],
+    "write": ["--approval-mode", "auto_edit"],
+    "readOnly": ["--approval-mode", "plan"],
+    "model": ["--model", "{model}"]
+  },
+  "events": [
+    { "match": { "type": "message", "role": "assistant" }, "kind": "message", "text": "{content}" },
+    { "match": { "type": "tool_use" }, "kind": "tool", "text": "[tool] {tool_name} {parameters}" },
+    { "match": { "type": "error", "severity": "error" }, "kind": "error", "text": "{message}" },
+    { "match": { "type": "error" }, "kind": "log", "text": "[warning] {message}" },
+    { "match": { "type": "result" }, "kind": "result", "text": "{status}", "usage": "stats", "okWhen": { "status": "success" } }
+  ]
+}

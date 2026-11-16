@@ -110,6 +110,8 @@ src/            ядро (TypeScript, запускається Node 24 напр�
   reviewer.ts      AI-рецензент QA + Security: diff → вердикт → repair / блок merge
   report.ts        звіт по проєкту й журнал рішень ADR (з історії, без нового сховища)
   maintenance.ts   діагностика (doctor) і резервні копії стану
+  adapters/plugin.ts  JSON-плагіни агентів (plugins/*.json, %LOCALAPPDATA%\HidForge\plugins)
+  adapters/wsl.ts     опційний запуск агента у WSL2 (експериментально)
   oneshot.ts       спільний одноразовий read-only запуск агента (планер, рецензент)
   store.ts, db.ts  SQLite: єдине джерело істини, міграції, state machine
   workspace.ts     git worktree, diff, allowedPaths, merge

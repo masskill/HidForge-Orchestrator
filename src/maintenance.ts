@@ -6,6 +6,7 @@ import type { Store } from './store.ts';
 import { SCHEMA_VERSION } from './db.ts';
 import { git } from './workspace.ts';
 import { run } from './proc.ts';
+import { wslDistros, type WslConfig } from './adapters/wsl.ts';
 
 // ---------------------------------------------------------------- backups
 export interface BackupInfo { name: string; file: string; sizeBytes: number; createdAt: string }
@@ -88,6 +89,15 @@ export async function diagnostics(orch: Orchestrator): Promise<Diagnostics> {
     if (!existsSync(p.repoPath)) { add(`project-${p.id}`, `Проєкт «${p.name}»`, 'error', `тека не існує: ${p.repoPath}`); continue; }
     const b = await git(p.repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${p.baseBranch}`], 10_000).catch(() => null);
     add(`project-${p.id}`, `Проєкт «${p.name}»`, b?.code === 0 ? 'ok' : 'error', b?.code === 0 ? `${p.repoPath} (${p.baseBranch})` : `гілку ${p.baseBranch} не знайдено в ${p.repoPath}`);
+  }
+
+  add('plugins', 'JSON-плагіни агентів', orch.pluginErrors.length ? 'warn' : 'ok',
+    orch.pluginErrors.length ? orch.pluginErrors.map((e) => `${e.file}: ${e.error}`).join('; ') : 'усі специфікації валідні');
+  const wsl = orch.store.getSetting<WslConfig | null>('wsl', null);
+  if (process.platform === 'win32') {
+    const distros = await wslDistros().catch(() => null);
+    const level: Level = !wsl ? 'info' : distros?.includes(wsl.distro) ? 'ok' : 'error';
+    add('wsl', 'WSL2', level, `${distros === null ? 'WSL не ввімкнено або дистрибутивів немає (`wsl -l -q` завершився з помилкою)' : distros.length ? `дистрибутиви: ${distros.join(', ')}` : 'дистрибутивів немає'}${wsl ? `; налаштовано: ${wsl.distro} для ${wsl.agents.join(', ') || '—'}` : '; не використовується'}`);
   }
 
   for (const a of await orch.registry.status(true)) {

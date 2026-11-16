@@ -27,6 +27,9 @@ export class MockAdapter implements AgentAdapter {
   }
 }
 
+/** Shipped JSON plugin specs (examples); users add their own to <dataDir>/plugins. */
+export const APP_PLUGINS_DIR = path.join(path.dirname(here), '..', '..', 'plugins');
+
 export function defaultAdapters(): AgentAdapter[] {
   return [new MockAdapter(), new CliAdapter(CLAUDE), new CliAdapter(CODEX), new CliAdapter(CURSOR), new CliAdapter(AGY)];
 }

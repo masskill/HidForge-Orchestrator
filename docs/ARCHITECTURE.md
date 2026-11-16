@@ -77,6 +77,12 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - `scripts/HidForge.vbs` — запуск без вікна (WSH `Run …, 0`), вивід у `%LOCALAPPDATA%\HidForge\hidforge.log`; `POST /api/shutdown` (з токеном) — коректна зупинка з UI.
 - `scripts/install.ps1` — ярлики користувача на `wscript.exe HidForge.vbs`; `scripts/update.ps1` — `git fetch` + `merge --ff-only`, `npm install` лише якщо є `node_modules` (для роботи залежності не потрібні).
 
+## JSON-плагіни агентів і WSL2 (`src/adapters/plugin.ts`, `src/adapters/wsl.ts`)
+- Специфікація плагіна: `id`, `name`, `bin`, `args.base|write|readOnly|model` (`{model}` лише в `args.model`), необов'язкові `auth.args` (код 0 → увійдено) і `models.args` + `pattern`, `events` — правила `{match: {шлях: значення}, kind, text: "шаблон {шлях}", usage, okWhen}`; перше правило, що збіглося, перетворює рядок JSONL у подію. Плагін стає звичайним `CliAdapter` — запуск, стрім, скасування, gate-и спільні.
+- Завантаження: `plugins/*.json` (приклади Gemini CLI, OpenCode) і `<dataDir>/plugins/*.json` (користувацькі, той самий `id` перевизначає приклад). Вбудовані `id` зарезервовано. Невалідний файл не ламає запуск — помилка видна в діагностиці.
+- Безпека при завантаженні: промпт лише через stdin (`{prompt}` заборонено), прапорці обходу дозволів (`--yolo`, `--approval-mode=yolo`, `--dangerously-*`, `--force`, `--trust`, `full-auto`, `allow-all` …) відхиляються, `bin` — лише ім'я команди з PATH.
+- WSL2: налаштування `wsl: {distro, agents}` додає агентів `<id>-wsl`, що запускаються як `wsl.exe -d <distro> --cd <шлях /mnt/...> --exec <bin> <args>` на тому ж Windows-worktree; git, gate-и й merge лишаються на Windows. Діє після перезапуску.
+
 ## Діагностика й резервні копії (`src/maintenance.ts`)
 - `createBackup` — `VACUUM INTO` у `dataDir/backups/hidforge-YYYYMMDD-HHMMSS-mmm.db` (узгоджена копія при працюючому сервері, без WAL), ротація — 10 останніх. `autoBackup` у `main.ts`: при запуску, якщо остання копія старша за добу і є хоч один проєкт.
 - `diagnostics` — список перевірок `{id, label, level: ok|info|warn|error, detail}`; `scripts/doctor.ts` створює `Orchestrator` без `start()` (жодного відновлення запусків), тож безпечний і поряд із запущеним сервером. Код виходу 1, якщо є `error`.

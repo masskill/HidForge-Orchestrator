@@ -1,0 +1,25 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "bin": "opencode",
+  "verified": false,
+  "notes": [
+    "Runs `opencode run --format json --agent build|plan` (opencode.ai/docs/cli). The prompt goes via stdin: the docs only show it as a positional argument, so stdin support is NOT confirmed — check with a tiny task first.",
+    "Usage and USD come from the final `step_finish` event of the run (earlier steps are not summed)."
+  ],
+  "args": {
+    "base": ["run", "--format", "json"],
+    "write": ["--agent", "build"],
+    "readOnly": ["--agent", "plan"],
+    "model": ["--model", "{model}"]
+  },
+  "auth": { "args": ["auth", "list"], "hint": "run `opencode auth login`" },
+  "models": { "args": ["models"], "pattern": "^([A-Za-z0-9._-]+/[^ ]+)$" },
+  "events": [
+    { "match": { "type": "text" }, "kind": "message", "text": "{part.text}" },
+    { "match": { "type": "tool_use" }, "kind": "tool", "text": "[tool] {part.tool} {part.state.title}" },
+    { "match": { "type": "step_finish", "part.reason": "stop" }, "kind": "result", "text": "done",
+      "usage": { "input_tokens": "part.tokens.input", "output_tokens": "part.tokens.output", "cache_read_tokens": "part.tokens.cache.read", "total_cost_usd": "part.cost" } },
+    { "match": { "type": "error" }, "kind": "error", "text": "{error.name} {error.data.message}" }
+  ]
+}
