@@ -161,7 +161,7 @@ test('restart: queue and logs survive, orphan worker is killed, no duplicate run
   const run1 = await waitFor(() => orch.store.runsForTask(t.id).find((r) => r.pid), 10_000, 'run with pid');
   await waitFor(() => orch.store.events({ taskId: t.id }).some((e) => e.type === 'run.output'), 10_000, 'output');
   const eventsBefore = orch.store.events({ taskId: t.id }).length;
-  orch.crashForTest(); // process "dies": nothing is cleaned up
+  await orch.crashForTest(); // process "dies": nothing is cleaned up
   assert.ok(isAlive(run1.pid!), 'orphan worker still alive after crash');
 
   const orch2 = new Orchestrator({ dataDir, tickMs: 40, backoffMs: 0 });

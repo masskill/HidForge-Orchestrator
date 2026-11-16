@@ -1,6 +1,8 @@
 // Task contract (prompt) given to a worker, and the verification-command policy.
 import type { Project, Task } from './store.ts';
 
+export const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'] as const;
+
 export function buildPrompt(task: Task, project: Project, attempt: number): string {
   const list = (xs: string[], empty: string) => (xs.length ? xs.map((x) => `- ${x}`).join('\n') : empty);
   return `# Task contract — HidForge task #${task.id}

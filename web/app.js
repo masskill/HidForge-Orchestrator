@@ -93,8 +93,9 @@ async function selectProject(id) {
 
 async function reloadProject() {
   if (!state.projectId) return;
-  const { project, tasks } = await api('GET', `/api/projects/${state.projectId}`);
-  state.project = project; state.tasks = tasks;
+  const [{ project, tasks }, plans] = await Promise.all([
+    api('GET', `/api/projects/${state.projectId}`), api('GET', `/api/projects/${state.projectId}/plans`)]);
+  state.project = project; state.tasks = tasks; state.plans = plans;
   renderMain();
   if (state.taskId) renderDetail();
 }
@@ -102,7 +103,9 @@ async function reloadProject() {
 function renderMain() {
   const p = state.project;
   const goal = h('textarea', { id: 'goal', placeholder: 'Загальна ціль проєкту…', style: 'min-height:48px;font-family:inherit;font-size:14px' });
-  goal.value = p.goal;
+  const prevGoal = $('#goal');
+  goal.value = prevGoal && prevGoal.dataset.pid === String(p.id) && prevGoal.value !== prevGoal.dataset.saved ? prevGoal.value : p.goal; // keep unsaved typing
+  goal.dataset.pid = String(p.id); goal.dataset.saved = p.goal;
   const cmds = h('textarea', { placeholder: 'Одна команда на рядок, напр. npm test' });
   cmds.value = p.allowedCommands.join('\n');
   const counts = {};
@@ -119,6 +122,7 @@ function renderMain() {
           await api('PATCH', `/api/projects/${p.id}`, { allowedCommands: cmds.value.split('\n').map((s) => s.trim()).filter(Boolean) });
           toast('Збережено'); await reloadProject();
         }) }, 'Зберегти'))),
+    plannerCard(goal),
     h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:8px' },
       h('div', { class: 'row' }, h('h3', { style: 'margin:0' }, 'План задач (DAG)'),
         ...Object.entries(counts).map(([s, n]) => h('span', { class: `badge s-${s}` }, `${STATUS_UA[s]}: ${n}`))),
@@ -127,6 +131,84 @@ function renderMain() {
         h('button', { disabled: !counts.draft, onclick: act(async () => { await api('POST', `/api/projects/${p.id}/submit-all`); await reloadProject(); }) }, `Запустити план (${counts.draft || 0})`))),
     h('div', { class: 'card', style: 'padding:0;overflow:auto' }, taskTable()),
   );
+}
+
+// ---------------------------------------------------------------- AI planner
+const PLAN_UA = { running: 'генерується', succeeded: 'готовий до перегляду', failed: 'помилка', canceled: 'скасовано', applied: 'застосовано', discarded: 'відхилено' };
+const PLAN_CLS = { running: 's-running', succeeded: 's-review', failed: 's-failed', canceled: 's-canceled', applied: 's-merged', discarded: 's-canceled' };
+
+function plannerCard(goalEl) {
+  const p = state.project;
+  const plan = (state.plans || [])[0];
+  const planners = state.agents.filter((a) => a.available && (a.mock || a.capabilities.readOnlyMode === 'supported'));
+  const prov = h('select', {}, h('option', { value: 'auto' }, 'auto (за політикою)'), ...planners.map((a) => h('option', { value: a.id }, a.mock ? 'mock (демо, не AI)' : a.name)));
+  const model = h('input', { placeholder: 'модель (необов\'язково)' });
+  const maxTasks = h('input', { type: 'number', min: 1, max: 30, value: 12, style: 'width:80px', title: 'Макс. задач' });
+  const busy = plan?.status === 'running';
+  const card = h('div', { class: 'card' },
+    h('div', { class: 'row', style: 'justify-content:space-between' }, h('h3', { style: 'margin:0' }, 'AI-планер: ціль → план задач'),
+      plan ? h('span', { class: `badge ${PLAN_CLS[plan.status]}` }, `#${plan.id} ${PLAN_UA[plan.status]} · ${plan.provider}${plan.model ? ' ' + plan.model : ''}`) : null),
+    h('p', { class: 'muted', style: 'margin:6px 0' }, 'Агент читає репозиторій у режимі лише читання й пропонує DAG задач. Нічого не створюється, доки ви не натиснете «Додати як чернетки».'),
+    h('div', { class: 'row' }, prov, model, maxTasks,
+      h('button', { disabled: busy, onclick: act(async () => {
+        if (goalEl.value !== p.goal) await api('PATCH', `/api/projects/${p.id}`, { goal: goalEl.value });
+        await api('POST', `/api/projects/${p.id}/plans`, { provider: prov.value, model: model.value.trim() || null, maxTasks: Number(maxTasks.value) });
+        await reloadProject();
+      }) }, 'Згенерувати план'),
+      busy ? h('button', { class: 'danger', onclick: act(async () => { await api('POST', `/api/plans/${plan.id}/cancel`); await reloadProject(); }) }, 'Зупинити') : null),
+  );
+  if (!plan || plan.status === 'discarded') return card;
+  if (busy || plan.status === 'failed' || plan.status === 'canceled') {
+    const log = h('div', { class: 'log', id: 'planlog', 'data-plan': plan.id, style: 'height:160px;margin-top:8px' });
+    for (const line of (plan.output || '').split('\n').slice(-200)) if (line) log.append(h('div', {}, line));
+    if (plan.error) card.append(h('p', {}, h('span', { class: 'badge b-bad' }, 'Причина'), ' ', plan.error));
+    card.append(log);
+    if (!busy) card.append(h('button', { class: 'ghost small', onclick: act(async () => { await api('POST', `/api/plans/${plan.id}/discard`).catch(() => {}); await reloadProject(); }) }, 'Сховати'));
+    if (busy) queueMicrotask(() => loadPlanLog(plan.id));
+    return card;
+  }
+  if (plan.status === 'applied') {
+    card.append(h('p', { class: 'muted' }, `Застосовано як чернетки: ${(plan.appliedTaskIds || []).map((i) => '#' + i).join(', ')}. Відредагуйте їх і натисніть «Запустити план».`));
+    return card;
+  }
+  // succeeded: preview + apply
+  const d = plan.plan;
+  const applyProv = h('select', {}, h('option', { value: 'auto' }, 'auto (за політикою)'),
+    ...state.agents.filter((a) => a.available).map((a) => h('option', { value: a.id }, a.mock ? 'mock' : a.id)));
+  applyProv.value = plan.provider === 'mock' ? 'mock' : 'auto';
+  card.append(
+    d.summary ? h('p', {}, d.summary) : null,
+    d.risks.length ? h('ul', { class: 'muted' }, ...d.risks.map((r) => h('li', {}, r))) : null,
+    h('div', { style: 'overflow:auto' }, h('table', {},
+      h('thead', {}, h('tr', {}, ...['Ключ', 'Задача', 'Роль', 'Залежить від', 'Шляхи', 'Перевірка'].map((c) => h('th', {}, c)))),
+      h('tbody', {}, ...d.tasks.map((t) => h('tr', { style: 'cursor:default', title: `${t.description}\n\nКритерії: ${t.acceptanceCriteria}` },
+        h('td', {}, h('code', {}, t.key)), h('td', {}, t.title, t.policy === 'read-only' ? h('span', { class: 'muted' }, ' (read-only)') : null),
+        h('td', {}, t.role), h('td', {}, t.dependsOn.length ? t.dependsOn.map((x) => (typeof x === 'number' ? `#${x}` : x)).join(', ') : '—'),
+        h('td', {}, t.allowedPaths.join(', ') || 'будь-які'), h('td', {}, t.verifyCommands.join('; ') || '—')))))),
+    h('div', { class: 'row', style: 'margin-top:8px' }, h('label', { class: 'row muted' }, 'Виконавець задач', applyProv),
+      h('button', { class: 'ok', onclick: act(async () => {
+        const tasks = await api('POST', `/api/plans/${plan.id}/apply`, { provider: applyProv.value });
+        toast(`Створено ${tasks.length} чернеток`); await reloadProject();
+      }) }, 'Додати як чернетки'),
+      h('button', { class: 'ghost', onclick: act(async () => { await api('POST', `/api/plans/${plan.id}/discard`); await reloadProject(); }) }, 'Відхилити')),
+  );
+  return card;
+}
+
+async function loadPlanLog(planId) {
+  const log = $('#planlog');
+  if (!log || log.dataset.loaded) return;
+  log.dataset.loaded = '1';
+  const evs = await api('GET', `/api/events?projectId=${state.projectId}&type=plan.output&limit=20000`);
+  for (const e of evs) if (e.type === 'plan.output' && e.data.planId === planId) appendPlanLog(e);
+}
+
+function appendPlanLog(e) {
+  const log = $('#planlog');
+  if (!log || Number(log.dataset.plan) !== e.data.planId) return;
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.append(h('div', { class: `k-${e.data.kind}` }, `${e.ts.slice(11, 19)} ${e.data.text}`));
+  if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
 function taskTable() {
@@ -275,6 +357,7 @@ function connectStream() {
   state.es.onmessage = (m) => {
     const e = JSON.parse(m.data);
     if (e.taskId === state.taskId && !state.editing) appendLog(e);
+    if (e.type === 'plan.output') { appendPlanLog(e); return; }
     if (e.type !== 'run.output') {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => { if (!state.editing) reloadProject().catch(() => {}); }, 150);
@@ -284,7 +367,7 @@ function connectStream() {
 
 // ---------------------------------------------------------------- boot
 await Promise.all([loadSettings(), loadProjects()]).catch((e) => toast(e.message));
-loadAgents().catch((e) => toast(e.message));
+loadAgents().then(() => { if (state.project) renderMain(); }).catch((e) => toast(e.message));
 const last = Number(ls.get('hf-project'));
 if (state.projects.some((p) => p.id === last)) selectProject(last);
 else if (state.projects.length) selectProject(state.projects[0].id);

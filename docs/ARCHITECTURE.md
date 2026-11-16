@@ -24,7 +24,7 @@
 | ТЗ | Реалізація |
 |---|---|
 | ProjectManager | `Orchestrator.addProject`, таблиця `projects` (repo, base branch, goal, allowedCommands) |
-| Planner | Ручний DAG-редактор у UI; `dag.ts` (валидація циклів, topo order). LLM-планер — Етап 4 |
+| Planner | `planner.ts` — LLM-планер (див. нижче) + ручний DAG-редактор у UI; `dag.ts` (валідація циклів, topo order) |
 | Scheduler | `Orchestrator.tick` — DAG, concurrency limit, priority, retry з експоненційним backoff |
 | AgentRegistry | `adapters/index.ts` — detect/auth/capabilities, rule-based routing |
 | AgentAdapter | `adapters/types.ts`; `cli.ts` (декларативні специфікації), `MockAdapter` |
@@ -54,6 +54,22 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - **Prompt** іде агенту через **stdin**, ніколи через argv (немає обмеження 32K і не видно в списку процесів).
 - **Події**: кожен рядок stdout → `adapter.parseLine` → нормалізований `AgentEvent` → таблиця `events` (з маскуванням секретів) → `EventEmitter` → SSE.
 - **Відновлення** (`recover`): живі `runs` позначаються `interrupted`, осиротілі процеси вбиваються (`taskkill /T /F`), блокування знімаються, задачі повертаються в чергу (з урахуванням ліміту спроб); незавершені gate-и та merge-і доводяться до кінця.
+
+## LLM-планер (`src/planner.ts`)
+
+```
+ціль проєкту ─▶ Planner.start ─▶ git worktree --detach (тимчасовий) ─▶ агент у read-only режимі
+   (claude --permission-mode plan / codex --sandbox read-only / agy --mode plan / mock)
+   prompt: ціль + git ls-files + наявні задачі + правила + JSON-схема відповіді
+─▶ parsePlan: JSON з ```json-блоку → валідація ─▶ plans.status = succeeded (лише пропозиція)
+─▶ людина: «Додати як чернетки» ─▶ apply(): в одній транзакції, у топологічному порядку,
+   ключі плану → id нових draft-задач ─▶ звичайний цикл (редагування → «Запустити план»)
+```
+- Валідація плану: ≤ `maxTasks`, унікальні ключі, залежності лише на ключі плану або наявні id, без циклів, `allowedPaths` без абсолютних шляхів і `..`, команди перевірки не з deny-list, невідома роль → `Backend`.
+- Таблиця `plans` (міграція v2): статус `running → succeeded | failed | canceled`, далі `applied | discarded`; унікальний індекс — один активний планер на проєкт.
+- Потік виводу — події `plan.output` / `plan.status` через той самий SSE.
+- Після рестарту активний планер позначається `failed` (його процес убивається) — сесії планування не відновлюються.
+- API: `POST/GET /api/projects/:id/plans`, `GET /api/plans/:id`, `POST /api/plans/:id/{apply,cancel,discard}`.
 
 ## Розміщення даних
 `HIDFORGE_DATA_DIR` (за замовчуванням `%LOCALAPPDATA%\HidForge`): `hidforge.db`, `worktrees\p<project>\t<task>`, `demo\`. Worktree-и лежать поза репозиторієм користувача; гілки — `hidforge/p<project>-t<task>`.

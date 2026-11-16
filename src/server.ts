@@ -49,8 +49,19 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     ['POST', /^\/api\/tasks\/(\d+)\/reject$/, (m, b) => orch.reject(id(m), String(b.feedback ?? ''), b.retry !== false)],
     ['POST', /^\/api\/tasks\/(\d+)\/answer$/, (m, b) => orch.answer(id(m), b.allow === true)],
     ['GET', /^\/api\/tasks\/(\d+)\/diff$/, async (m) => ({ diff: await orch.diff(id(m)) })],
+    ['GET', /^\/api\/projects\/(\d+)\/plans$/, (m) => s.listPlans(id(m))],
+    ['POST', /^\/api\/projects\/(\d+)\/plans$/, (m, b) => orch.planner.start(id(m), {
+      provider: b.provider ? String(b.provider) : undefined, model: b.model ? String(b.model) : null,
+      maxTasks: b.maxTasks === undefined ? undefined : Number(b.maxTasks),
+    })],
+    ['GET', /^\/api\/plans\/(\d+)$/, (m) => s.getPlan(id(m))],
+    ['POST', /^\/api\/plans\/(\d+)\/cancel$/, (m) => orch.planner.cancel(id(m))],
+    ['POST', /^\/api\/plans\/(\d+)\/discard$/, (m) => orch.planner.discard(id(m))],
+    ['POST', /^\/api\/plans\/(\d+)\/apply$/, (m, b) => orch.planner.apply(id(m), {
+      provider: b.provider ? String(b.provider) : undefined, model: b.model ? String(b.model) : null,
+    })],
     ['GET', /^\/api\/events$/, (_m, _b, u) => s.events({
-      afterId: Number(u.searchParams.get('after') ?? 0), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), limit: num(u, 'limit') ?? 2000,
+      afterId: Number(u.searchParams.get('after') ?? 0), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), type: u.searchParams.get('type') ?? undefined, limit: num(u, 'limit') ?? 2000,
     })],
   ];
 

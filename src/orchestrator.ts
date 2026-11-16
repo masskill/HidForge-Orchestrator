@@ -12,6 +12,7 @@ import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, type RoutingPolicy } f
 import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
 import { buildPrompt, commandDecision } from './contract.ts';
+import { Planner } from './planner.ts';
 
 export interface OrchestratorOptions {
   dataDir: string;
@@ -34,6 +35,7 @@ export class Orchestrator {
   readonly store: Store;
   readonly registry: AgentRegistry;
   readonly ws: WorkspaceManager;
+  readonly planner: Planner;
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -47,6 +49,7 @@ export class Orchestrator {
     this.store = new Store(openDb(path.join(this.opts.dataDir, 'hidforge.db')));
     this.registry = new AgentRegistry(o.adapters ?? defaultAdapters());
     this.ws = new WorkspaceManager(path.join(this.opts.dataDir, 'worktrees'));
+    this.planner = new Planner(this);
   }
 
   get maxConcurrent(): number { return this.store.getSetting('maxConcurrentAgents', this.opts.maxConcurrent); }
@@ -54,6 +57,7 @@ export class Orchestrator {
 
   async start(): Promise<void> {
     await this.recover();
+    await this.planner.recover();
     this.timer = setInterval(() => { void this.tick(); }, this.opts.tickMs);
   }
 
@@ -61,24 +65,30 @@ export class Orchestrator {
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    await this.tickSettled();
+    await this.planner.stop();
     await Promise.all([...this.handles.values()].map(async (h) => { if (h.child.pid) await killTree(h.child.pid); await h.exited; }));
     await this.idle();
     this.store.db.close();
   }
 
+  private async tickSettled(): Promise<void> { while (this.ticking) await new Promise((r) => setTimeout(r, 10)); }
+
   /** Test hook: simulate a crash — stop scheduling and drop handles WITHOUT killing workers or updating the DB. */
-  crashForTest(): void {
+  async crashForTest(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    await this.tickSettled();
     for (const h of this.handles.values()) { h.done = true; h.child.stdout?.destroy(); h.child.stderr?.destroy(); }
     this.handles.clear();
+    this.planner.abandon();
     this.store.db.close();
   }
 
   /** Wait until background gate/merge work has settled. */
   async idle(): Promise<void> { while (this.pending.size) await Promise.allSettled([...this.pending]); }
 
-  private track<T>(p: Promise<T>): Promise<T> {
+  track<T>(p: Promise<T>): Promise<T> {
     this.pending.add(p);
     void p.finally(() => this.pending.delete(p)).catch(() => {});
     return p;

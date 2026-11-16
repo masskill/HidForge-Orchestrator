@@ -2,7 +2,7 @@
 
 Локальний Windows-first оркестратор для AI-агентів програмування (Claude Code, Codex CLI, Antigravity `agy`, Cursor Agent CLI). Велика ціль → DAG задач → паралельні агенти в ізольованих git worktree → незалежні перевірки → ручний `Approve & Merge` → один цілісний репозиторій. Стан переживає перезапуск.
 
-**Статус: v0.1 MVP (вертикальний зріз).** Ядро, Mock Agent, реальні адаптери Claude Code та agy перевірені наскрізно. Деталі: [docs/TEST_REPORT.md](docs/TEST_REPORT.md), [docs/ROADMAP.md](docs/ROADMAP.md).
+**Статус: v0.2.** Ядро, Mock Agent, реальні адаптери Claude Code та agy перевірені наскрізно; LLM-планер (ціль → DAG чернеток) перевірено на Claude Code та agy. Деталі: [docs/TEST_REPORT.md](docs/TEST_REPORT.md), [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Вимоги
 - Windows 10/11 x64 (Linux/macOS теж мають працювати, але не перевірялися)
@@ -43,12 +43,18 @@ npm start
 node scripts\smoke-real.ts claude agy
 ```
 
+Смоук-тест LLM-планера на справжніх CLI (`провайдер[:модель]`):
+```powershell
+node scripts\smoke-planner.ts claude:haiku agy
+```
+
 Налаштування — `.env` (див. [.env.example](.env.example)): каталог даних, порт, паралелізм, stall-таймаут. За замовчуванням дані лежать у `%LOCALAPPDATA%\HidForge`.
 
 ## Як користуватися
 1. Ліворуч — вкажіть шлях до Git-репозиторію й натисніть «Відкрити» (або «Створити демо-проєкт»). Робоча копія має бути на гілці, без незакомічених змін під час merge.
 2. Блок «Агенти» показує встановлені CLI, версії, стан авторизації та причину недоступності.
-3. «+ Задача»: назва, інструкції, критерії, роль, виконавець (`auto` = за політикою cost-first/balanced/quality-first), права (`read-only` / `workspace-write`), залежності `#id`, дозволені шляхи (glob), команди перевірки.
+3. **AI-планер**: впишіть ціль, оберіть агента (або `mock` для демо) і натисніть «Згенерувати план». Агент у режимі лише читання пропонує DAG задач; перегляньте таблицю й натисніть «Додати як чернетки» (або «Відхилити»).
+   Або вручну — «+ Задача»: назва, інструкції, критерії, роль, виконавець (`auto` = за політикою cost-first/balanced/quality-first), права (`read-only` / `workspace-write`), залежності `#id`, дозволені шляхи (glob), команди перевірки.
 4. «Запустити план» — незалежні задачі стартують паралельно (за замовчуванням до 2), залежні — після merge своїх залежностей.
 5. Відкрийте задачу: живий журнал, evidence, diff. Якщо gate потребує дозволу на команду перевірки — «Дозволити/Заборонити».
 6. `Approve & Merge` або `Reject` (з поясненням — агент отримає його в repair-спробі). Конфлікт merge не руйнує нічого: задача `blocked`, «Повторити» зливає базу в її гілку і просить агента розв'язати конфлікт.
@@ -69,6 +75,7 @@ node scripts\smoke-real.ts claude agy
 ```
 src/            ядро (TypeScript, запускається Node 24 напряму)
   orchestrator.ts  scheduler, запуски, gate-и, merge, відновлення
+  planner.ts       LLM-планер: ціль → валідований DAG → чернетки задач
   store.ts, db.ts  SQLite: єдине джерело істини, міграції, state machine
   workspace.ts     git worktree, diff, allowedPaths, merge
   adapters/        Mock + Claude/Codex/Cursor/agy

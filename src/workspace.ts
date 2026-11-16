@@ -44,6 +44,13 @@ export class WorkspaceManager {
     return { workspace, branch, baseCommit, created: true };
   }
 
+  /** Throw-away detached worktree (read-only planning sessions). */
+  async addDetached(repo: string, ref: string, dir: string): Promise<void> {
+    mkdirSync(path.dirname(dir), { recursive: true });
+    await git(repo, ['worktree', 'prune']);
+    await gitOk(repo, ['worktree', 'add', '--detach', dir, ref]);
+  }
+
   /** Commit whatever the agent left in the worktree. Returns true if a commit was made. */
   async commitAll(workspace: string, message: string): Promise<boolean> {
     await gitOk(workspace, ['add', '-A']);

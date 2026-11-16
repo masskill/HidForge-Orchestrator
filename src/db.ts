@@ -77,6 +77,27 @@ const MIGRATIONS: string[] = [
   create index events_task on events(task_id, id);
   create table settings (key text primary key, value text not null);
   `,
+  // v2: LLM planner runs (goal -> draft DAG)
+  `
+  create table plans (
+    id integer primary key,
+    project_id integer not null references projects(id) on delete cascade,
+    provider text not null,
+    model text,
+    status text not null,
+    goal text not null,
+    pid integer,
+    output text,
+    plan text,
+    error text,
+    usage text,
+    applied_task_ids text,
+    created_at text not null,
+    finished_at text
+  );
+  -- one running planner per project
+  create unique index plans_one_running_per_project on plans(project_id) where status = 'running';
+  `,
 ];
 
 export function openDb(file: string): DatabaseSync {

@@ -54,6 +54,18 @@ export interface Run {
   lastOutputAt: string | null;
 }
 
+export interface PlanTask {
+  key: string; title: string; description: string; acceptanceCriteria: string; dependsOn: (string | number)[];
+  role: string; allowedPaths: string[]; verifyCommands: string[]; policy: Policy;
+}
+export interface PlanDoc { summary: string; risks: string[]; tasks: PlanTask[] }
+export interface PlanRun {
+  id: number; projectId: number; provider: string; model: string | null;
+  status: 'running' | 'succeeded' | 'failed' | 'canceled' | 'applied' | 'discarded';
+  goal: string; pid: number | null; output: string | null; plan: PlanDoc | null; error: string | null;
+  usage: unknown; appliedTaskIds: number[] | null; createdAt: string; finishedAt: string | null;
+}
+
 export interface HfEvent { id: number; projectId: number | null; taskId: number | null; runId: number | null; type: string; data: unknown; ts: string }
 
 type Row = Record<string, unknown>;
@@ -89,6 +101,15 @@ function toRun(r: Row): Run {
     exitCode: r.exit_code == null ? null : Number(r.exit_code), error: (r.error as string) ?? null,
     usage: pj(r.usage, null), startedAt: String(r.started_at), endedAt: (r.ended_at as string) ?? null,
     lastOutputAt: (r.last_output_at as string) ?? null,
+  };
+}
+
+function toPlan(r: Row): PlanRun {
+  return {
+    id: Number(r.id), projectId: Number(r.project_id), provider: String(r.provider), model: (r.model as string) ?? null,
+    status: r.status as PlanRun['status'], goal: String(r.goal), pid: r.pid == null ? null : Number(r.pid),
+    output: (r.output as string) ?? null, plan: pj(r.plan, null), error: (r.error as string) ?? null, usage: pj(r.usage, null),
+    appliedTaskIds: pj(r.applied_task_ids, null), createdAt: String(r.created_at), finishedAt: (r.finished_at as string) ?? null,
   };
 }
 
@@ -241,6 +262,42 @@ export class Store {
     return this.db.prepare('select * from workspace_locks').all().map((r) => ({ workspace: String(r.workspace), runId: Number(r.run_id) }));
   }
 
+  // ---- planner runs
+  createPlan(p: { projectId: number; provider: string; model: string | null; goal: string }): PlanRun {
+    try {
+      const r = this.db.prepare(`insert into plans (project_id, provider, model, status, goal, created_at) values (?,?,?, 'running', ?, ?) returning *`)
+        .get(p.projectId, p.provider, p.model, p.goal, now()) as Row;
+      return toPlan(r);
+    } catch (e) {
+      if (String((e as Error).message).includes('UNIQUE')) throw new Conflict('a planner is already running for this project');
+      throw e;
+    }
+  }
+  getPlan(id: number): PlanRun {
+    const r = this.db.prepare('select * from plans where id = ?').get(id) as Row | undefined;
+    if (!r) throw new NotFound(`plan ${id}`);
+    return toPlan(r);
+  }
+  listPlans(projectId: number, limit = 20): PlanRun[] {
+    return this.db.prepare('select * from plans where project_id = ? order by id desc limit ?').all(projectId, limit).map((r) => toPlan(r as Row));
+  }
+  runningPlans(): PlanRun[] { return this.db.prepare(`select * from plans where status = 'running'`).all().map((r) => toPlan(r as Row)); }
+  updatePlan(id: number, f: Partial<Pick<PlanRun, 'status' | 'pid' | 'output' | 'plan' | 'error' | 'usage' | 'appliedTaskIds' | 'provider'>>): PlanRun {
+    const cols: Record<string, string> = { status: 'status', pid: 'pid', output: 'output', plan: 'plan', error: 'error', usage: 'usage', appliedTaskIds: 'applied_task_ids', provider: 'provider' };
+    const sets: string[] = [];
+    const vals: (string | number | null)[] = [];
+    for (const [k, v] of Object.entries(f)) {
+      sets.push(`${cols[k]} = ?`);
+      vals.push(['plan', 'usage', 'appliedTaskIds'].includes(k) ? (v == null ? null : j(v)) : (v as string | number | null) ?? null);
+    }
+    if (f.status && f.status !== 'running') { sets.push('finished_at = coalesce(finished_at, ?)'); vals.push(now()); }
+    vals.push(id);
+    this.db.prepare(`update plans set ${sets.join(', ')} where id = ?`).run(...vals);
+    const plan = this.getPlan(id);
+    if (f.status) this.event({ projectId: plan.projectId, type: 'plan.status', data: { planId: id, status: f.status, error: plan.error } });
+    return plan;
+  }
+
   // ---- events
   event(e: { projectId?: number | null; taskId?: number | null; runId?: number | null; type: string; data: unknown }): HfEvent {
     const data = typeof e.data === 'string' ? maskSecrets(e.data) : e.data;
@@ -250,11 +307,12 @@ export class Store {
     this.bus.emit('event', ev);
     return ev;
   }
-  events(f: { afterId?: number; projectId?: number; taskId?: number; limit?: number }): HfEvent[] {
+  events(f: { afterId?: number; projectId?: number; taskId?: number; type?: string; limit?: number }): HfEvent[] {
     const where: string[] = ['id > ?'];
-    const vals: number[] = [f.afterId ?? 0];
+    const vals: (number | string)[] = [f.afterId ?? 0];
     if (f.projectId) { where.push('project_id = ?'); vals.push(f.projectId); }
     if (f.taskId) { where.push('task_id = ?'); vals.push(f.taskId); }
+    if (f.type) { where.push('type = ?'); vals.push(f.type); }
     vals.push(f.limit ?? 2000);
     return this.db.prepare(`select * from events where ${where.join(' and ')} order by id limit ?`).all(...vals).map((r) => ({
       id: Number(r.id), projectId: r.project_id as number | null, taskId: r.task_id as number | null, runId: r.run_id as number | null,
