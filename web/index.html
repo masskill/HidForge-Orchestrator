@@ -5,48 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="hidforge-token" content="__HIDFORGE_TOKEN__">
   <title>HidForge Orchestrator</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/ui.css">
   <script src="theme.js"></script>
 </head>
 <body>
-  <header class="top">
-    <strong class="brand">HidForge <span>Orchestrator</span></strong>
-    <div class="top-controls">
-      <label>Паралельно <select id="maxConc"></select></label>
-      <label>Автовибір <select id="routing">
-        <option value="cost-first">cost-first</option>
-        <option value="balanced">balanced</option>
-        <option value="quality-first">quality-first</option>
-      </select></label>
-      <select id="theme" title="Тема">
-        <option value="system">Тема: системна</option>
-        <option value="light">Світла</option>
-        <option value="dark">Темна</option>
-      </select>
-    </div>
-  </header>
-  <div class="layout">
-    <aside class="side">
-      <section>
-        <h3>Проєкти</h3>
-        <ul id="projects" class="list"></ul>
-        <form id="openRepo" class="stack">
-          <input id="repoPath" placeholder="Шлях до Git-репозиторію, напр. E:\code\app" required>
-          <button>Відкрити</button>
-        </form>
-        <button id="demoBtn" class="ghost">Створити демо-проєкт (Mock)</button>
-      </section>
-      <section>
-        <h3>Агенти <button id="refreshAgents" class="ghost small" title="Перевірити знову">↻</button></h3>
-        <ul id="agents" class="list agents"></ul>
-      </section>
+  <!-- AppShell: sidebar (brand, project switcher, navigation, connection) + main column (topbar, page) -->
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Навігація">
+      <div class="brand" id="brand"><div>HidForge<small>Orchestrator</small></div></div>
+      <div>
+        <div class="side-label">Проєкт</div>
+        <div class="row" style="flex-wrap:nowrap">
+          <select id="projectSel" class="select" aria-label="Поточний проєкт"></select>
+          <span id="addProjectSlot"></span>
+        </div>
+      </div>
+      <nav class="nav" id="nav" aria-label="Розділи"></nav>
+      <div class="side-foot" id="sideFoot"></div>
     </aside>
-    <main id="main">
-      <p class="muted pad">Оберіть або відкрийте проєкт ліворуч.</p>
-    </main>
-    <aside id="detail" class="detail hidden"></aside>
+    <div class="scrim" id="scrim"></div>
+    <div class="main-col">
+      <header class="topbar">
+        <span id="menuSlot"></span>
+        <div class="crumbs" id="crumbs"></div>
+        <div class="spacer"></div>
+        <div class="row" id="topActions"></div>
+      </header>
+      <main class="page" id="page" tabindex="-1"></main>
+    </div>
   </div>
-  <div id="toast" class="toast hidden"></div>
   <script src="app.js" type="module"></script>
 </body>
 </html>

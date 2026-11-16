@@ -1,0 +1,79 @@
+/* HidForge design tokens — the single source of colors, radii, spacing and type.
+   Dark (operator console) is the default; light is an optional variant. Components use only these variables. */
+:root {
+  /* surfaces */
+  --bg-app: #0B0F0D;
+  --bg-sidebar: #0D120F;
+  --bg-panel: #111713;
+  --bg-panel-alt: #151C17;
+  --bg-input: #0E1410;
+  --bg-hover: rgba(120, 200, 150, 0.06);
+  /* borders */
+  --border: rgba(120, 160, 130, 0.18);
+  --border-strong: rgba(120, 200, 150, 0.28);
+  /* text */
+  --text: #F2F5F2;
+  --text-2: #A8B3AB;
+  --text-muted: #7D867F;
+  /* accents */
+  --accent: #47E0A1;
+  --accent-hover: #3BD392;
+  --accent-soft: rgba(71, 224, 161, 0.14);
+  --on-accent: #06140D;
+  --success: #33D17A;
+  --warning: #F5C86A;
+  --danger: #FF6B6B;
+  --info: #7DD3FC;
+  --success-soft: rgba(51, 209, 122, 0.14);
+  --warning-soft: rgba(245, 200, 106, 0.14);
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --info-soft: rgba(125, 211, 252, 0.14);
+  /* radius */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+  /* spacing: 4 / 8 / 12 / 16 / 24 / 32 */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
+  /* type */
+  --font: Inter, Manrope, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 22px; --fs-2xl: 28px; --fs-stat: 30px;
+  --tracking-id: 0.08em;
+  /* effects: soft, used sparingly */
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --focus: 0 0 0 3px rgba(71, 224, 161, 0.35);
+  --sidebar-w: 248px;
+  color-scheme: dark;
+}
+
+/* Light variant: same identity (mint accent, rounded panels), light surfaces. */
+:root[data-theme="light"] {
+  --bg-app: #F3F6F4;
+  --bg-sidebar: #EAF0EC;
+  --bg-panel: #FFFFFF;
+  --bg-panel-alt: #F4F8F5;
+  --bg-input: #FFFFFF;
+  --bg-hover: rgba(20, 120, 80, 0.06);
+  --border: rgba(30, 80, 50, 0.14);
+  --border-strong: rgba(20, 120, 80, 0.30);
+  --text: #102017;
+  --text-2: #3E4F44;
+  --text-muted: #66756B;
+  --accent: #0E9F66;
+  --accent-hover: #0B8A58;
+  --accent-soft: rgba(14, 159, 102, 0.12);
+  --on-accent: #FFFFFF;
+  --success: #12884A;
+  --warning: #9A6700;
+  --danger: #C7372F;
+  --info: #0B6FA4;
+  --success-soft: rgba(18, 136, 74, 0.10);
+  --warning-soft: rgba(154, 103, 0, 0.10);
+  --danger-soft: rgba(199, 55, 47, 0.10);
+  --info-soft: rgba(11, 111, 164, 0.10);
+  --shadow: 0 8px 24px rgba(16, 32, 23, 0.12);
+  --focus: 0 0 0 3px rgba(14, 159, 102, 0.30);
+  color-scheme: light;
+}
