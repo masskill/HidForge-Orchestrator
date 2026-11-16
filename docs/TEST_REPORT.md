@@ -1,5 +1,14 @@
 # Звіт про перевірку
 
+## Бекенд для сторінок «Запуски» і «Ролі», облік токенів Cursor (2026-11-16)
+
+| Перевірка | Результат |
+|---|---|
+| Знайдено | ❌→✅ Cursor звітує токени в camelCase (`inputTokens`, `outputTokens`, `cacheReadTokens`), а облік витрат читав лише snake_case — токени Cursor у «Витратах» були нулями. Тепер спільний `usageTokens()`; `reasoningTokens` не додаються, бо можуть уже входити в `outputTokens` |
+| `GET /api/projects/:id/runs` (`before`, `limit` ≤ 1000, `status`, `provider`) | ✅ `test/costs.test.ts`: від новіших до старіших, назва задачі, тривалість, USD, пагінація й фільтри |
+| `roleDefaults` у `GET /api/settings`, скидання ролі збереженням без неї | ✅ `test/roles.test.ts` |
+| Gemini CLI, OpenCode | 🟡 встановлено, без входу не перевірено (вхід свідомо відкладено) |
+
 ## Реальні прогони з вашими дозволами (2026-11-16)
 
 | Перевірка | Результат |

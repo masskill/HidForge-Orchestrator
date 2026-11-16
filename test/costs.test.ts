@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { CliAdapter, CLAUDE, CURSOR, MODEL_LINE, parseModelList } from '../src/adapters/cli.ts';
-import { projectCosts } from '../src/costs.ts';
+import { projectCosts, projectRuns, usageTokens } from '../src/costs.ts';
 import { createServer } from '../src/server.ts';
 import { setup, mock, waitStatus } from './helpers.ts';
 
@@ -83,4 +83,29 @@ test('costs/budget/models HTTP API', async () => {
     assert.equal(orch.trusts('cursor'), true);
     assert.equal(orch.trusts('claude'), false);
   } finally { await srv.close(); await orch.stop(); }
+});
+
+test('usage tokens are read from snake_case and camelCase (Cursor) reports', () => {
+  assert.deepEqual(usageTokens({ inputTokens: 10, outputTokens: 4, cacheReadTokens: 5, cacheWriteTokens: 1, reasoningTokens: 3 }), { input: 16, output: 4, usd: null });
+  assert.deepEqual(usageTokens({ input_tokens: 2, cache_read_input_tokens: 3, output_tokens: 1, total_cost_usd: 0.01 }), { input: 5, output: 1, usd: 0.01 });
+  assert.deepEqual(usageTokens(null), { input: 0, output: 0, usd: null });
+});
+
+test('project runs: newest first with task title, duration, cost; paging and filters', async () => {
+  const { orch, project } = await setup();
+  try {
+    const a = orch.createTask(project.id, { title: 'Перша', allowedPaths: ['a/**'], description: mock({ costUsd: 0.02, write: { 'a/a.txt': 'A' } }) });
+    const b = orch.createTask(project.id, { title: 'Друга', maxAttempts: 1, description: mock({ mode: 'crash' }) });
+    orch.submit(a.id); await waitStatus(orch, a.id, ['review']);
+    orch.submit(b.id); await waitStatus(orch, b.id, ['failed']);
+    const all = projectRuns(orch.store, project.id);
+    assert.deepEqual(all.map((r) => r.taskTitle), ['Друга', 'Перша']);
+    assert.equal(all[1]!.usd, 0.02);
+    assert.ok(all[1]!.durationMs! >= 0 && all[1]!.status === 'succeeded');
+    assert.equal(all[0]!.status, 'failed');
+    assert.deepEqual(projectRuns(orch.store, project.id, { before: all[0]!.id }).map((r) => r.id), [all[1]!.id]);
+    assert.deepEqual(projectRuns(orch.store, project.id, { status: 'failed' }).map((r) => r.taskTitle), ['Друга']);
+    assert.equal(projectRuns(orch.store, project.id, { provider: 'claude' }).length, 0);
+    assert.equal(projectRuns(orch.store, project.id, { limit: 1 }).length, 1);
+  } finally { await orch.stop(); }
 });

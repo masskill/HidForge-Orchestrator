@@ -50,5 +50,9 @@ test('role templates API', async () => {
     assert.equal((await put({ roleTemplates: { QA: { providers: ['nope'] } } })).status, 400);
     const s1 = await (await put({ roleTemplates: { QA: { instructions: 'tests', readOnly: false, providers: ['mock'] } } })).json() as { roleTemplates: Record<string, { providers: string[] }> };
     assert.deepEqual(s1.roleTemplates.QA!.providers, ['mock']);
+    // reset = save without the role: the default comes back, and roleDefaults lets the UI tell edited roles apart
+    await put({ roleTemplates: {} });
+    const s2 = await (await fetch(`${base}/api/settings`)).json() as { roleTemplates: Record<string, { instructions: string }>; roleDefaults: Record<string, { instructions: string }> };
+    assert.equal(s2.roleTemplates.QA!.instructions, s2.roleDefaults.QA!.instructions);
   } finally { await srv.close(); await orch.stop(); }
 });

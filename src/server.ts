@@ -10,7 +10,7 @@ import { git } from './workspace.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
 import { normalizeReviewPolicy } from './reviewer.ts';
 import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contract.ts';
-import { projectCosts } from './costs.ts';
+import { projectCosts, projectRuns } from './costs.ts';
 import { projectReport, adrMarkdown, decisions } from './report.ts';
 import { diagnostics, listBackups, createBackup } from './maintenance.ts';
 import { normalizeWsl } from './adapters/wsl.ts';
@@ -51,7 +51,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       return a.listModels ? a.listModels() : [];
     }],
     ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}),
-      roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, wsl: s.getSetting('wsl', null), ssh: s.getSetting('ssh', null) })],
+      roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, roleDefaults: DEFAULT_ROLE_TEMPLATES, wsl: s.getSetting('wsl', null), ssh: s.getSetting('ssh', null) })],
     ['PUT', /^\/api\/settings$/, (_m, b) => {
       if (b.maxConcurrentAgents !== undefined) s.setSetting('maxConcurrentAgents', Math.max(1, Math.min(16, Number(b.maxConcurrentAgents) || 1)));
       if (b.routingPolicy !== undefined) {
@@ -88,6 +88,8 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       budgetUsd: b.budgetUsd === undefined ? undefined : budget(b.budgetUsd),
     })],
     ['GET', /^\/api\/projects\/(\d+)\/costs$/, (m) => projectCosts(s, id(m))],
+    ['GET', /^\/api\/projects\/(\d+)\/runs$/, (m, _b, u) => { s.getProject(id(m)); return projectRuns(s, id(m), {
+      before: num(u, 'before'), limit: num(u, 'limit'), status: u.searchParams.get('status') ?? undefined, provider: u.searchParams.get('provider') ?? undefined }); }],
     ['GET', /^\/api\/projects\/(\d+)\/report$/, (m) => ({ markdown: projectReport(s, id(m)) })],
     ['GET', /^\/api\/projects\/(\d+)\/adr$/, (m) => ({ markdown: adrMarkdown(s, id(m)), decisions: decisions(s, id(m)) })],
     ['POST', /^\/api\/projects\/(\d+)\/tasks$/, (m, b) => orch.createTask(id(m), { ...b, title: str(b.title, 'title') })],

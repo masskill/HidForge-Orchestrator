@@ -264,6 +264,15 @@ export class Store {
   }
   getRun(id: number): Run { return toRun(this.db.prepare('select * from runs where id = ?').get(id) as Row); }
   runsForTask(taskId: number): Run[] { return this.db.prepare('select * from runs where task_id = ? order by id').all(taskId).map((r) => toRun(r as Row)); }
+  runsForProject(projectId: number, f: { before?: number; limit?: number; status?: string; provider?: string } = {}): (Run & { taskTitle: string })[] {
+    const where = ['t.project_id = ?']; const vals: (number | string)[] = [projectId];
+    if (f.before) { where.push('r.id < ?'); vals.push(f.before); }
+    if (f.status) { where.push('r.status = ?'); vals.push(f.status); }
+    if (f.provider) { where.push('r.provider = ?'); vals.push(f.provider); }
+    vals.push(Math.min(Math.max(f.limit ?? 100, 1), 1000));
+    return this.db.prepare(`select r.*, t.title as task_title from runs r join tasks t on t.id = r.task_id where ${where.join(' and ')} order by r.id desc limit ?`)
+      .all(...vals).map((r) => ({ ...toRun(r as Row), taskTitle: String((r as Row).task_title) }));
+  }
   liveRuns(): Run[] { return this.db.prepare(`select * from runs where status = 'running'`).all().map((r) => toRun(r as Row)); }
   locks(): { workspace: string; runId: number }[] {
     return this.db.prepare('select * from workspace_locks').all().map((r) => ({ workspace: String(r.workspace), runId: Number(r.run_id) }));
