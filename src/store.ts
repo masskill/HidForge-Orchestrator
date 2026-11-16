@@ -314,14 +314,18 @@ export class Store {
     this.bus.emit('event', ev);
     return ev;
   }
-  events(f: { afterId?: number; projectId?: number; taskId?: number; type?: string; limit?: number }): HfEvent[] {
+  /** Oldest first after `afterId`; with `beforeId`, the newest events below it, still returned oldest first (log paging). */
+  events(f: { afterId?: number; beforeId?: number; projectId?: number; taskId?: number; type?: string; limit?: number }): HfEvent[] {
     const where: string[] = ['id > ?'];
     const vals: (number | string)[] = [f.afterId ?? 0];
+    if (f.beforeId) { where.push('id < ?'); vals.push(f.beforeId); }
     if (f.projectId) { where.push('project_id = ?'); vals.push(f.projectId); }
     if (f.taskId) { where.push('task_id = ?'); vals.push(f.taskId); }
     if (f.type) { where.push('type = ?'); vals.push(f.type); }
     vals.push(f.limit ?? 2000);
-    return this.db.prepare(`select * from events where ${where.join(' and ')} order by id limit ?`).all(...vals).map((r) => ({
+    const rows = this.db.prepare(`select * from events where ${where.join(' and ')} order by id ${f.beforeId ? 'desc' : ''} limit ?`).all(...vals);
+    if (f.beforeId) rows.reverse();
+    return rows.map((r) => ({
       id: Number(r.id), projectId: r.project_id as number | null, taskId: r.task_id as number | null, runId: r.run_id as number | null,
       type: String(r.type), data: pj(r.data, null), ts: String(r.ts),
     }));

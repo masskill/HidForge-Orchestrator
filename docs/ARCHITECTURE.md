@@ -83,6 +83,14 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - Безпека при завантаженні: промпт лише через stdin (`{prompt}` заборонено), прапорці обходу дозволів (`--yolo`, `--approval-mode=yolo`, `--dangerously-*`, `--force`, `--trust`, `full-auto`, `allow-all` …) відхиляються, `bin` — лише ім'я команди з PATH.
 - WSL2: налаштування `wsl: {distro, agents}` додає агентів `<id>-wsl`, що запускаються як `wsl.exe -d <distro> --cd <шлях /mnt/...> --exec <bin> <args>` на тому ж Windows-worktree; git, gate-и й merge лишаються на Windows. Діє після перезапуску.
 
+## VPS через SSH (`src/adapters/ssh.ts`)
+- Налаштування `ssh: {host, port, remoteDir, agents}` додає агентів `<id>-ssh` (діє після перезапуску). Хост — `host`, `user@host` або аліас з `~/.ssh/config`; вхід лише ключем/агентом користувача (`-o BatchMode=yes`), пароль і ключі HidForge не зберігає, перевірку known_hosts не вимикає.
+- Перед запуском (`prepare`): файли worktree (`git ls-files -c -o --exclude-standard`, без `.git`, symlink і підмодулів) пакуються власним мінімальним tar-писачем (ustar + pax для довгих і неASCII-імен) і потоком ідуть у `ssh` → на хості `<remoteDir>/<pN-tN>`, `git init` і базовий коміт. Теки старші за 2 доби прибираються.
+- Запуск: `ssh -T … -- host "cd '<dir>' && exec '<bin>' '<args>'…"` — кожне слово в одинарних лапках, промпт лише через stdin.
+- Після успіху (`collect`): хост віддає `git diff --cached --binary` відносно базового коміту; патч без symlink і шляхів `.git` застосовується `git apply` у локальному worktree, віддалена копія видаляється. Далі — звичайні gate-и, AI-рецензія й merge локально.
+- Планер і рецензент на `-ssh` агентах теж отримують копію (лише `prepare`).
+- Обмеження: скасування закриває з'єднання ssh, але гарантії, що віддалений CLI завершиться, немає; PATH на хості — неінтерактивної оболонки.
+
 ## Діагностика й резервні копії (`src/maintenance.ts`)
 - `createBackup` — `VACUUM INTO` у `dataDir/backups/hidforge-YYYYMMDD-HHMMSS-mmm.db` (узгоджена копія при працюючому сервері, без WAL), ротація — 10 останніх. `autoBackup` у `main.ts`: при запуску, якщо остання копія старша за добу і є хоч один проєкт.
 - `diagnostics` — список перевірок `{id, label, level: ok|info|warn|error, detail}`; `scripts/doctor.ts` створює `Orchestrator` без `start()` (жодного відновлення запусків), тож безпечний і поряд із запущеним сервером. Код виходу 1, якщо є `error`.

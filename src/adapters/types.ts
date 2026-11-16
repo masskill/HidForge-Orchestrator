@@ -59,4 +59,8 @@ export interface AgentAdapter {
   parseLine(line: string): AgentEvent | null;
   /** Models this account can use (from the CLI itself); empty if the CLI cannot list them. */
   listModels?(): Promise<ModelInfo[]>;
+  /** Remote backends (ssh): copy the workspace to the host before a run... */
+  prepare?(workspace: string): Promise<void>;
+  /** ...and bring the agent's changes back into the local workspace after a successful run. */
+  collect?(workspace: string): Promise<void>;
 }

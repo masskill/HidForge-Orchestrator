@@ -11,6 +11,7 @@ import { WorkspaceManager, inspectRepo, checkAllowedPaths, git } from './workspa
 import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, APP_PLUGINS_DIR, type RoutingPolicy } from './adapters/index.ts';
 import { loadPlugins, type PluginLoad } from './adapters/plugin.ts';
 import { WslAdapter, type WslConfig } from './adapters/wsl.ts';
+import { SshAdapter, type SshConfig } from './adapters/ssh.ts';
 import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
 import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
@@ -59,7 +60,9 @@ export class Orchestrator {
     const base = o.adapters ?? [...defaultAdapters(), ...plugins.adapters];
     const wsl = this.store.getSetting<WslConfig | null>('wsl', null);
     const viaWsl = wsl ? base.filter((a) => wsl.agents.includes(a.id) && !a.mock).map((a) => new WslAdapter(a, wsl.distro)) : [];
-    this.registry = new AgentRegistry([...base, ...viaWsl]);
+    const ssh = this.store.getSetting<SshConfig | null>('ssh', null);
+    const viaSsh = ssh ? base.filter((a) => ssh.agents.includes(a.id) && !a.mock).map((a) => new SshAdapter(a, ssh)) : [];
+    this.registry = new AgentRegistry([...base, ...viaWsl, ...viaSsh]);
     this.ws = new WorkspaceManager(path.join(this.opts.dataDir, 'worktrees'));
     this.planner = new Planner(this);
     this.reviewer = new Reviewer(this);
@@ -361,11 +364,18 @@ export class Orchestrator {
       data: { attempt: run.attempt, provider: t.provider, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });
 
     let child: ChildProcess;
-    try { child = spawnSafe(inv.command, inv.args, { cwd: w.workspace }); }
-    catch (e) {
+    try {
+      if (adapter.prepare) {
+        await adapter.prepare(w.workspace);
+        if (this.store.getTask(t.id).status !== 'running') { // canceled during the upload
+          this.store.releaseLock(w.workspace); this.store.endRun(run.id, 'canceled', {}); return false;
+        }
+      }
+      child = spawnSafe(inv.command, inv.args, { cwd: w.workspace });
+    } catch (e) {
       this.store.releaseLock(w.workspace);
       this.store.endRun(run.id, 'failed', { error: (e as Error).message });
-      this.failOrRetry(this.store.getTask(t.id), `spawn failed: ${(e as Error).message}`);
+      this.failOrRetry(this.store.getTask(t.id), `${adapter.prepare ? 'start' : 'spawn'} failed: ${(e as Error).message}`);
       return false;
     }
     let resolveExit!: () => void;
@@ -411,14 +421,17 @@ export class Orchestrator {
     if (h.done) return;
     h.done = true;
     this.handles.delete(h.run.id);
-    this.store.releaseLock(h.workspace);
     const usage = h.result?.usage ?? null;
-    if (h.canceled) { this.store.endRun(h.run.id, 'canceled', { exitCode: code, usage }); return; }
+    if (h.canceled) { this.store.releaseLock(h.workspace); this.store.endRun(h.run.id, 'canceled', { exitCode: code, usage }); return; }
     let failure: string | null = null;
     if (h.killReason) failure = h.killReason;
     else if (code !== 0) failure = `agent exited with code ${code}`;
     else if (!h.result) failure = 'agent exited without a result event';
     else if (h.result.isError) failure = `agent reported an error: ${h.result.text.slice(0, 500)}`;
+    if (!failure && h.adapter.collect) {
+      try { await h.adapter.collect(h.workspace); } catch (e) { failure = (e as Error).message; }
+    }
+    this.store.releaseLock(h.workspace);
     this.store.endRun(h.run.id, failure ? (h.killReason ? 'timeout' : 'failed') : 'succeeded', { exitCode: code, error: failure, usage });
     const t = this.store.getTask(h.taskId);
     if (t.status !== 'running') return; // canceled meanwhile

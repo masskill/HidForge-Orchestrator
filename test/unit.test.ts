@@ -108,3 +108,13 @@ test('adapters normalize stream events', () => {
   assert.equal(agy.parseLine('{"event":"result","result":{"status":"SUCCESS","response":"PONG","usage":{"total_tokens":3}}}')!.isError, false);
   assert.equal(agy.parseLine('plain text')!.kind, 'log');
 });
+
+test('events: beforeId pages backwards (newest below the id), still oldest first', async () => {
+  const { Store } = await import('../src/store.ts');
+  const { openDb } = await import('../src/db.ts');
+  const s = new Store(openDb(':memory:'));
+  for (let i = 1; i <= 5; i++) s.event({ type: 'x', data: { i } });
+  assert.deepEqual(s.events({ beforeId: 5, limit: 2 }).map((e) => e.id), [3, 4]);
+  assert.deepEqual(s.events({ afterId: 3 }).map((e) => e.id), [4, 5]);
+  s.db.close();
+});

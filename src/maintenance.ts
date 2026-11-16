@@ -5,8 +5,9 @@ import type { Orchestrator } from './orchestrator.ts';
 import type { Store } from './store.ts';
 import { SCHEMA_VERSION } from './db.ts';
 import { git } from './workspace.ts';
-import { run } from './proc.ts';
+import { run, resolveCommand } from './proc.ts';
 import { wslDistros, type WslConfig } from './adapters/wsl.ts';
+import type { SshConfig } from './adapters/ssh.ts';
 
 // ---------------------------------------------------------------- backups
 export interface BackupInfo { name: string; file: string; sizeBytes: number; createdAt: string }
@@ -99,6 +100,11 @@ export async function diagnostics(orch: Orchestrator): Promise<Diagnostics> {
     const level: Level = !wsl ? 'info' : distros?.includes(wsl.distro) ? 'ok' : 'error';
     add('wsl', 'WSL2', level, `${distros === null ? 'WSL не ввімкнено або дистрибутивів немає (`wsl -l -q` завершився з помилкою)' : distros.length ? `дистрибутиви: ${distros.join(', ')}` : 'дистрибутивів немає'}${wsl ? `; налаштовано: ${wsl.distro} для ${wsl.agents.join(', ') || '—'}` : '; не використовується'}`);
   }
+
+  const ssh = orch.store.getSetting<SshConfig | null>('ssh', null);
+  const sshBin = resolveCommand('ssh');
+  add('ssh', 'VPS / SSH', !ssh ? 'info' : sshBin ? 'ok' : 'error',
+    `${sshBin ? `клієнт OpenSSH: ${sshBin.file}` : 'клієнт ssh не знайдено в PATH (OpenSSH Client у «Додаткових компонентах» Windows)'}${ssh ? `; налаштовано: ${ssh.host}${ssh.port ? `:${ssh.port}` : ''} для ${ssh.agents.join(', ') || '—'} (з'єднання перевіряє рядок агента нижче)` : '; не використовується'}`);
 
   for (const a of await orch.registry.status(true)) {
     if (a.mock) continue;

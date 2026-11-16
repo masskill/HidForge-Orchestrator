@@ -48,8 +48,9 @@ export class WslAdapter implements AgentAdapter {
     return [`Runs inside WSL distro "${this.distro}" via \`wsl.exe --exec\` on the Windows worktree (/mnt/<drive>/...). Experimental: not verified on a real distro by HidForge; cancelling kills wsl.exe, which normally ends the Linux process.`, ...this.inner.notes()];
   }
   buildInvocation(ctx: StartContext): Invocation {
-    const inv = this.inner.buildInvocation(ctx);
-    return { command: 'wsl.exe', args: ['-d', this.distro, '--cd', toWslPath(ctx.workspace), '--exec', inv.command, ...inv.args], stdin: inv.stdin };
+    const dir = toWslPath(ctx.workspace);
+    const inv = this.inner.buildInvocation({ ...ctx, workspace: dir }); // the CLI runs in Linux (codex --cd)
+    return { command: 'wsl.exe', args: ['-d', this.distro, '--cd', dir, '--exec', inv.command, ...inv.args], stdin: inv.stdin };
   }
   parseLine(line: string) { return this.inner.parseLine(line); }
   async listModels(): Promise<ModelInfo[]> { return []; }

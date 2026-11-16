@@ -14,6 +14,7 @@ import { projectCosts } from './costs.ts';
 import { projectReport, adrMarkdown, decisions } from './report.ts';
 import { diagnostics, listBackups, createBackup } from './maintenance.ts';
 import { normalizeWsl } from './adapters/wsl.ts';
+import { normalizeSsh } from './adapters/ssh.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
@@ -50,7 +51,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       return a.listModels ? a.listModels() : [];
     }],
     ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}),
-      roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, wsl: s.getSetting('wsl', null) })],
+      roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, wsl: s.getSetting('wsl', null), ssh: s.getSetting('ssh', null) })],
     ['PUT', /^\/api\/settings$/, (_m, b) => {
       if (b.maxConcurrentAgents !== undefined) s.setSetting('maxConcurrentAgents', Math.max(1, Math.min(16, Number(b.maxConcurrentAgents) || 1)));
       if (b.routingPolicy !== undefined) {
@@ -64,6 +65,10 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       }
       if (b.wsl !== undefined) {
         try { s.setSetting('wsl', normalizeWsl(b.wsl, (p) => Boolean(orch.registry.get(p)))); }
+        catch (e) { throw new BadRequest((e as Error).message); }
+      }
+      if (b.ssh !== undefined) {
+        try { s.setSetting('ssh', normalizeSsh(b.ssh, (p) => Boolean(orch.registry.get(p)))); }
         catch (e) { throw new BadRequest((e as Error).message); }
       }
       if (b.roleTemplates !== undefined) {
@@ -113,7 +118,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       provider: b.provider ? String(b.provider) : undefined, model: b.model ? String(b.model) : null,
     })],
     ['GET', /^\/api\/events$/, (_m, _b, u) => s.events({
-      afterId: Number(u.searchParams.get('after') ?? 0), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), type: u.searchParams.get('type') ?? undefined, limit: num(u, 'limit') ?? 2000,
+      afterId: Number(u.searchParams.get('after') ?? 0), beforeId: num(u, 'before'), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), type: u.searchParams.get('type') ?? undefined, limit: num(u, 'limit') ?? 2000,
     })],
   ];
 

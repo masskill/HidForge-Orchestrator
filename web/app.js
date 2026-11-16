@@ -749,24 +749,40 @@ function budgetSettings(p) {
       await reloadProject(); toast('Бюджет збережено', 'success'); render();
     }) }, 'Зберегти')));
 }
-/** JSON plugin adapters (read-only info) and the optional WSL2 backend. */
+/** JSON plugin adapters (read-only info) and the optional WSL2 / VPS (ssh) backends. */
 function agentsExtSettings() {
   const s = state.settings || {};
   const distro = TextInput({ value: s.wsl?.distro || '', placeholder: 'напр. Ubuntu', 'aria-label': 'Дистрибутив WSL' });
   const agents = TextInput({ value: (s.wsl?.agents || []).join(', '), placeholder: 'напр. claude, codex', 'aria-label': 'Агенти у WSL' });
+  const sshHost = TextInput({ value: s.ssh?.host || '', placeholder: 'напр. dev@my-vps або аліас з ~/.ssh/config', 'aria-label': 'SSH-хост' });
+  const sshPort = TextInput({ value: s.ssh?.port || '', type: 'number', min: 1, max: 65535, placeholder: '22', 'aria-label': 'SSH-порт' });
+  const sshDir = TextInput({ value: s.ssh?.remoteDir || '', placeholder: '.hidforge/work', 'aria-label': 'Тека на хості' });
+  const sshAgents = TextInput({ value: (s.ssh?.agents || []).join(', '), placeholder: 'напр. claude, codex', 'aria-label': 'Агенти через SSH' });
+  const list = (v) => v.split(/[\s,]+/).filter(Boolean);
   const save = act(async () => {
     const d = distro.value.trim();
-    await api('PUT', '/api/settings', { wsl: d ? { distro: d, agents: agents.value.split(/[\s,]+/).filter(Boolean) } : null });
+    const host = sshHost.value.trim();
+    await api('PUT', '/api/settings', {
+      wsl: d ? { distro: d, agents: list(agents.value) } : null,
+      ssh: host ? { host, port: sshPort.value ? Number(sshPort.value) : null, remoteDir: sshDir.value.trim(), agents: list(sshAgents.value) } : null,
+    });
     await loadSettings(); toast('Збережено. Діє після перезапуску сервера', 'success'); render();
   });
   const plugins = (state.agents || []).filter((a) => a.notes?.some((n) => n.startsWith('JSON plugin')));
-  return PanelCard({ title: 'Плагіни агентів і WSL2', subtitle: 'Додаткові CLI без зміни коду; запуск агентів у дистрибутиві WSL (експериментально)' },
+  return PanelCard({ title: 'Плагіни агентів, WSL2 і VPS', subtitle: 'Додаткові CLI без зміни коду; запуск агентів у WSL або на VPS через SSH (експериментально)' },
     h('p', { class: 'text-2', style: 'margin:0;font-size:var(--fs-sm)' },
       `JSON-плагіни: ${plugins.map((a) => a.id).join(', ') || 'немає'}. Власні специфікації кладіть у `, h('span', { class: 'mono' }, '%LOCALAPPDATA%\\HidForge\\plugins\\*.json'),
       ' (формат — plugins\\gemini.json). Прапорці обходу дозволів і промпт в аргументах відхиляються при завантаженні. Діє після перезапуску.'),
     h('div', { class: 'grid cols-2' },
       Field('Дистрибутив WSL', distro, 'Порожньо — WSL не використовується'),
       Field('Агенти у WSL', agents, 'З’являться як окремі агенти з суфіксом -wsl')),
+    h('p', { class: 'text-2', style: 'margin:0;font-size:var(--fs-sm)' },
+      'VPS через SSH (експериментально): файли worktree копіюються на хост, агент працює там, зміни повертаються як git diff і проходять звичайні перевірки. Вхід — лише вашим SSH-ключем (без пароля), хост має бути в known_hosts; на хості потрібні git, tar і сам CLI з власною авторизацією.'),
+    h('div', { class: 'grid cols-2' },
+      Field('SSH-хост', sshHost, 'Порожньо — SSH не використовується'),
+      Field('Порт', sshPort, 'Порожньо — з ~/.ssh/config або 22'),
+      Field('Тека на хості', sshDir, 'Відносно домашньої теки; за замовчуванням .hidforge/work'),
+      Field('Агенти через SSH', sshAgents, 'З’являться як окремі агенти з суфіксом -ssh')),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: save }, 'Зберегти')));
 }
 
