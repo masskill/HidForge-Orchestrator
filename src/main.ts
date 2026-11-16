@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Orchestrator } from './orchestrator.ts';
 import { spawn } from 'node:child_process';
 import { createServer, createDemo, APP_NAME } from './server.ts';
+import { autoBackup } from './maintenance.ts';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(n);
@@ -38,6 +39,10 @@ const orch = new Orchestrator({
   stallTimeoutSec: Number(process.env.HIDFORGE_STALL_TIMEOUT_SEC ?? 600),
 });
 await orch.start();
+try {
+  const b = autoBackup(orch.store, dataDir);
+  if (b) console.log(`Backup: ${b.file}`);
+} catch (e) { console.error(`Backup failed: ${(e as Error).message}`); }
 const srv = createServer(orch, { port, webDir: path.resolve(here, '..', 'web'), onShutdown: () => void shutdown() });
 const actual = await srv.listen();
 if (flag('--demo')) {

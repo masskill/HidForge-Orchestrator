@@ -28,6 +28,12 @@ powershell -ExecutionPolicy Bypass -File scripts\update.ps1 -Check
 powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 ```
 
+Діагностика (Node, Git, тека даних і вільне місце, цілісність бази, версія схеми, резервні копії, репозиторії проєктів, агенти); безпечно й при запущеному сервері:
+```powershell
+node scripts\doctor.ts
+```
+Те саме й резервні копії — у «Налаштування → Діагностика й резервні копії». Копія стану (`VACUUM INTO`) робиться автоматично при запуску не частіше разу на добу в `%LOCALAPPDATA%\HidForge\backups` (10 останніх). Відновлення: зупиніть сервер, видаліть `hidforge.db-wal` і `hidforge.db-shm` і скопіюйте потрібну копію замість `hidforge.db`.
+
 ## Команди (PowerShell)
 
 ```powershell
@@ -103,6 +109,7 @@ src/            ядро (TypeScript, запускається Node 24 напр�
   planner.ts       LLM-планер: ціль → валідований DAG → чернетки задач
   reviewer.ts      AI-рецензент QA + Security: diff → вердикт → repair / блок merge
   report.ts        звіт по проєкту й журнал рішень ADR (з історії, без нового сховища)
+  maintenance.ts   діагностика (doctor) і резервні копії стану
   oneshot.ts       спільний одноразовий read-only запуск агента (планер, рецензент)
   store.ts, db.ts  SQLite: єдине джерело істини, міграції, state machine
   workspace.ts     git worktree, diff, allowedPaths, merge

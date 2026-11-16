@@ -605,6 +605,7 @@ function settingsPage() {
     p ? reviewSettings(p) : null,
     trustSettings(),
     rolesSettings(),
+    maintenanceSettings(),
     aboutSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
@@ -625,6 +626,43 @@ function budgetSettings(p) {
       await reloadProject(); toast('Бюджет збережено', 'success'); render();
     }) }, 'Зберегти')));
 }
+const CHECK_TONE = { ok: 'success', info: 'neutral', warn: 'warning', error: 'danger' };
+const CHECK_LABEL = { ok: 'OK', info: 'інфо', warn: 'увага', error: 'помилка' };
+
+/** Diagnostics (doctor) and backups of the local state. */
+function maintenanceSettings() {
+  const diag = h('div', {});
+  const backups = h('div', {});
+  const kb = (b) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} КБ` : `${(b / 1048576).toFixed(1)} МБ`);
+  const loadBackups = async () => {
+    const r = await api('GET', '/api/backups');
+    backups.replaceChildren(r.backups.length
+      ? Table({ columns: [
+        { label: 'Копія', class: 'grow', render: (b) => h('span', { class: 'mono' }, b.name) },
+        { label: 'Створено (UTC)', render: (b) => b.createdAt.slice(0, 16).replace('T', ' ') },
+        { label: 'Розмір', render: (b) => kb(b.sizeBytes) },
+      ], rows: r.backups })
+      : h('p', { class: 'muted', style: 'margin:0' }, 'Копій ще немає.'),
+    h('p', { class: 'text-2', style: 'margin:0;font-size:var(--fs-sm)' }, 'Тека: ', h('span', { class: 'mono' }, r.dir),
+      '. Автоматично — при запуску, не частіше разу на добу; зберігаються 10 останніх. Відновлення: зупиніть сервер і скопіюйте потрібну копію замість hidforge.db у теці даних (видаливши hidforge.db-wal і hidforge.db-shm).'));
+  };
+  const runDiag = act(async () => {
+    diag.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, 'Перевіряю…'));
+    const d = await api('GET', '/api/diagnostics');
+    diag.replaceChildren(Table({ columns: [
+      { label: 'Перевірка', render: (c) => h('strong', {}, c.label) },
+      { label: 'Стан', render: (c) => Badge(CHECK_LABEL[c.level], CHECK_TONE[c.level]) },
+      { label: 'Деталі', class: 'grow', render: (c) => h('span', { class: 'wrap' }, c.detail) },
+    ], rows: d.checks }));
+  });
+  loadBackups().catch((e) => backups.replaceChildren(h('p', { class: 'muted' }, e.message)));
+  return PanelCard({ title: 'Діагностика й резервні копії', subtitle: 'Стан середовища, бази й агентів; копії локального стану (SQLite)' },
+    h('div', { class: 'row' },
+      SecondaryButton({ icon: 'activity', onClick: runDiag }, 'Запустити діагностику'),
+      SecondaryButton({ icon: 'check', onClick: act(async () => { await api('POST', '/api/backups'); await loadBackups(); toast('Резервну копію створено', 'success'); }) }, 'Створити копію зараз')),
+    diag, backups);
+}
+
 /** Version, updates and stopping a server that was started without a terminal. */
 function aboutSettings() {
   const info = h('div', {}, h('p', { class: 'muted', style: 'margin:0' }, 'Завантаження…'));

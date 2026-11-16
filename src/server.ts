@@ -12,6 +12,7 @@ import { normalizeReviewPolicy } from './reviewer.ts';
 import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contract.ts';
 import { projectCosts } from './costs.ts';
 import { projectReport, adrMarkdown, decisions } from './report.ts';
+import { diagnostics, listBackups, createBackup } from './maintenance.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
@@ -33,6 +34,9 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
   const routes: [string, RegExp, Handler][] = [
     ['GET', /^\/api\/health$/, () => ({ ok: true })],
     ['GET', /^\/api\/version$/, () => appVersion(path.resolve(o.webDir, '..'))],
+    ['GET', /^\/api\/diagnostics$/, () => diagnostics(orch)],
+    ['GET', /^\/api\/backups$/, () => ({ dir: path.join(orch.opts.dataDir, 'backups'), backups: listBackups(orch.opts.dataDir) })],
+    ['POST', /^\/api\/backups$/, () => createBackup(s, orch.opts.dataDir)],
     ['POST', /^\/api\/shutdown$/, () => {
       if (!o.onShutdown) throw new BadRequest('shutdown is not available in this mode');
       setTimeout(o.onShutdown, 100);

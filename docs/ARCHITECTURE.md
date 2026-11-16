@@ -77,6 +77,11 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - `scripts/HidForge.vbs` — запуск без вікна (WSH `Run …, 0`), вивід у `%LOCALAPPDATA%\HidForge\hidforge.log`; `POST /api/shutdown` (з токеном) — коректна зупинка з UI.
 - `scripts/install.ps1` — ярлики користувача на `wscript.exe HidForge.vbs`; `scripts/update.ps1` — `git fetch` + `merge --ff-only`, `npm install` лише якщо є `node_modules` (для роботи залежності не потрібні).
 
+## Діагностика й резервні копії (`src/maintenance.ts`)
+- `createBackup` — `VACUUM INTO` у `dataDir/backups/hidforge-YYYYMMDD-HHMMSS-mmm.db` (узгоджена копія при працюючому сервері, без WAL), ротація — 10 останніх. `autoBackup` у `main.ts`: при запуску, якщо остання копія старша за добу і є хоч один проєкт.
+- `diagnostics` — список перевірок `{id, label, level: ok|info|warn|error, detail}`; `scripts/doctor.ts` створює `Orchestrator` без `start()` (жодного відновлення запусків), тож безпечний і поряд із запущеним сервером. Код виходу 1, якщо є `error`.
+- Відновлення свідомо ручне (зупинка сервера + заміна файлу): автоматична заміна живої бази з UI ризикованіша за користь.
+
 ## Integrator, звіти й ADR (`src/orchestrator.ts`, `src/report.ts`)
 - Після merge задачі її перевірки запускаються на базовій гілці. Якщо хоч одна падає, `createIntegrator` створює **чернетку** задачі ролі Integrator: опис містить вивід перевірки (секрети замасковано, останні 3000 символів), `verifyCommands` — ті самі команди, критерій — exit 0. Задача лише пропонується: запускає її користувач. Зв'язок — `artifacts.integratorTaskId` і evidence `integrator`.
 - `projectReport` — markdown-звіт: підсумок (% злитих), статуси, таблиця задач з AI-вердиктом і останнім доказом, «Потребує уваги», витрати за агентами, перелік рішень.
