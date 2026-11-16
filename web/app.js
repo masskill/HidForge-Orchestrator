@@ -3,6 +3,7 @@ import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
   PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
+  Kanban, DagGraph, statusTone,
 } from './ui.js';
 
 const TOKEN = document.querySelector('meta[name="hidforge-token"]').content;
@@ -10,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* blocked */ } } };
 const state = {
   projects: [], agents: null, settings: null, projectId: null, project: null, tasks: [], plans: [], activity: [],
-  page: 'overview', taskId: null, editing: null, filter: ls.get('hf-filter') || 'all', query: '', showCanceled: false,
+  page: 'overview', taskId: null, editing: null, filter: ls.get('hf-filter') || 'all', view: ls.get('hf-view') || 'table', query: '', showCanceled: false,
   detailTab: 'log', es: null, live: false, costs: null, models: {},
 };
 const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'];
@@ -222,6 +223,16 @@ const FILTERS = [
   { id: 'done', label: 'Готово', match: (t) => ['merged', 'accepted'].includes(t.status) },
   { id: 'problem', label: 'Проблеми', match: (t) => PROBLEM.includes(t.status) },
 ];
+const BOARD = [
+  { id: 'draft', title: 'Чернетки', statuses: ['draft'] },
+  { id: 'queue', title: 'Черга', statuses: ['ready', 'queued'] },
+  { id: 'running', title: 'Виконується', statuses: ['running'] },
+  { id: 'review', title: "Рев'ю", statuses: ['review', 'needs_user_input'] },
+  { id: 'problems', title: 'Проблеми', statuses: ['failed', 'blocked'] },
+  { id: 'done', title: 'Готово', statuses: ['accepted', 'merged'] },
+  { id: 'canceled', title: 'Скасовані', statuses: ['canceled'] },
+];
+
 function tasksPage() {
   const q = state.query.trim().toLowerCase();
   const f = FILTERS.find((x) => x.id === state.filter) || FILTERS[0];
@@ -244,6 +255,16 @@ function tasksPage() {
       text: state.tasks.length ? 'Змініть фільтр або пошуковий запит.' : 'Згенеруйте план AI-планером або додайте задачу вручну.',
       action: state.tasks.length ? null : h('div', { class: 'row' }, SecondaryButton({ icon: 'planner', onClick: () => go('#/planner') }, 'AI-планер'), newTaskButton()) }),
   });
+  const open = (t) => go(`#/tasks/${t.id}`);
+  const board = () => Kanban({ empty: '—', columns: BOARD.map((c) => ({ id: c.id, title: c.title, items: visible.filter((t) => c.statuses.includes(t.status)) })),
+    card: (t) => h('button', { type: 'button', class: t.id === state.taskId ? 'kcard sel' : 'kcard', onClick: () => open(t) },
+      h('span', { class: 'wrap' }, h('span', { class: 'id' }, `#${t.id} `), t.title),
+      h('span', { class: 'kmeta' }, h('span', {}, `${t.assignedRole} · ${t.provider}`), StatusBadge(t.status))) });
+  const graph = () => (visible.length ? DagGraph({ selected: state.taskId, onNode: (n) => open(n.task),
+    nodes: visible.map((t) => ({ id: t.id, task: t, label: `#${t.id} ${t.title}`, sub: `${STATUS_LABEL[t.status] || t.status} · ${t.provider}`, tone: statusTone(t.status) })),
+    edges: visible.flatMap((t) => t.dependsOn.map((d) => [d, t.id])) }) : table);
+  const views = { table: () => PanelCard({ flush: true }, table), kanban: board, graph: () => PanelCard({}, graph()) };
+  const view = (views[state.view] || views.table)();
   const search = SearchInput({ placeholder: 'Пошук за назвою, #id, роллю…', value: state.query, onInput: (e) => { state.query = e.target.value; tasksPage(); const i = $('.toolbar input[type=search]'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); } });
   const detail = h('div', { class: 'detail', id: 'detail' });
   mount(
@@ -251,8 +272,9 @@ function tasksPage() {
     h('div', { class: 'toolbar' },
       Segmented(FILTERS.map((x) => ({ id: x.id, label: x.label, count: state.tasks.filter(x.match).length })), state.filter, (id) => { state.filter = id; ls.set('hf-filter', id); tasksPage(); }),
       search,
-      Toggle({ label: 'Показувати скасовані', checked: state.showCanceled, onChange: (v) => { state.showCanceled = v; tasksPage(); } })),
-    h('div', { class: `split${hasDetail ? '' : ' solo'}` }, PanelCard({ flush: true }, table), hasDetail ? detail : null),
+      Toggle({ label: 'Показувати скасовані', checked: state.showCanceled, onChange: (v) => { state.showCanceled = v; tasksPage(); } }),
+      Segmented([{ id: 'table', label: 'Таблиця' }, { id: 'kanban', label: 'Kanban' }, { id: 'graph', label: 'Граф' }], state.view in views ? state.view : 'table', (id) => { state.view = id; ls.set('hf-view', id); tasksPage(); })),
+    h('div', { class: `split${hasDetail ? '' : ' solo'}` }, view, hasDetail ? detail : null),
   );
   if (hasDetail) renderDetail().catch((e) => toast(e.message, 'danger'));
 }

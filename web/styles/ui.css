@@ -239,3 +239,29 @@ dialog.modal::backdrop { background: rgba(3, 6, 4, 0.66); }
   .btn { min-height: 42px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------------------------------------------------------------- Kanban */
+.kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: var(--s-3); overflow-x: auto; padding-bottom: var(--s-2); }
+.kcol { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-3); display: grid; gap: var(--s-3); align-content: start; min-height: 160px; }
+.kcol-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-weight: 650; font-size: var(--fs-sm); color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.kcol-body { display: grid; gap: var(--s-2); }
+.kcol-empty { margin: 0; font-size: var(--fs-sm); }
+.kcard { background: var(--bg-panel-alt); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-3); display: grid; gap: var(--s-2); cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.kcard:hover, .kcard.sel { border-color: var(--border-strong); }
+.kcard:focus-visible { outline: none; box-shadow: var(--focus); }
+.kcard .kmeta { display: flex; gap: var(--s-2); align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ---------------------------------------------------------------- DAG graph */
+.dag-wrap { overflow: auto; max-width: 100%; }
+.dag { display: block; }
+.dag-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.6; }
+.dag-arrowhead { fill: var(--border-strong); }
+.dag-node { cursor: pointer; }
+.dag-node rect { fill: var(--bg-panel-alt); stroke: var(--border); stroke-width: 1.2; }
+.dag-node:hover rect, .dag-node.sel rect { stroke: var(--accent); }
+.dag-node:focus-visible { outline: none; } .dag-node:focus-visible rect { stroke: var(--accent); stroke-width: 2.6; }
+.dag-label { fill: var(--text); font-size: 13px; font-weight: 650; font-family: var(--font); }
+.dag-sub { fill: var(--text-muted); font-size: 11.5px; font-family: var(--font); }
+.dag-node.t-success rect { stroke: var(--success); } .dag-node.t-warning rect { stroke: var(--warning); }
+.dag-node.t-danger rect { stroke: var(--danger); } .dag-node.t-info rect { stroke: var(--info); } .dag-node.t-accent rect { stroke: var(--accent); }
+.dag-node.sel rect { stroke: var(--accent); stroke-width: 2.6; }

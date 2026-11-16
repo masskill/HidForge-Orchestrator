@@ -34,7 +34,7 @@
 | IntegrationManager | `doApprove` (серіалізований merge `--no-ff`, abort при конфлікті), post-merge checks, `rebaseOntoBase` |
 | Persistence | `db.ts` — `node:sqlite`, WAL, міграції `schema_migrations` |
 | API | `server.ts` — REST + SSE `/api/stream` з replay `after`/`Last-Event-ID` |
-| UI | `web/` — проєкти, агенти, DAG-таблиця, форма задачі, живий журнал, evidence, diff, approve/reject, теми |
+| UI | `web/` — проєкти, агенти, задачі (таблиця / kanban / SVG-граф DAG), форма задачі, живий журнал, evidence, diff, approve/reject, теми |
 
 ## Життєвий цикл задачі
 

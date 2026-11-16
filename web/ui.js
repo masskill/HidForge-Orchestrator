@@ -251,3 +251,57 @@ export function toast(msg, tone = 'info') {
   box.append(t);
   setTimeout(() => t.remove(), tone === 'danger' ? 8000 : 4500);
 }
+
+// ---------------------------------------------------------------- Kanban
+/** Kanban({ columns: [{ id, title, items }], card: (item) => Node, empty }) — status board; columns scroll horizontally on small screens. */
+export function Kanban({ columns, card, empty = 'Порожньо' }) {
+  return h('div', { class: 'kanban', role: 'list' }, ...columns.map((c) => h('section', { class: 'kcol', role: 'listitem', 'aria-label': c.title },
+    h('div', { class: 'kcol-head' }, h('span', {}, c.title), Badge(String(c.items.length), 'neutral', { plain: true })),
+    c.items.length ? h('div', { class: 'kcol-body' }, ...c.items.map(card)) : h('p', { class: 'muted kcol-empty' }, empty))));
+}
+
+// ---------------------------------------------------------------- DagGraph (inline SVG, no library)
+/**
+ * DagGraph({ nodes: [{ id, label, sub, tone }], edges: [[from, to]], onNode, selected })
+ * Layered layout: column = longest dependency chain to the node; edges are curves from dependency to dependent.
+ */
+export function DagGraph({ nodes, edges, onNode, selected }) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const W = 210, H = 58, GX = 70, GY = 18, PAD = 16;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const deps = new Map(nodes.map((n) => [n.id, edges.filter(([, to]) => to === n.id).map(([f]) => f).filter((f) => byId.has(f))]));
+  const level = new Map();
+  const lv = (id, seen = new Set()) => {
+    if (level.has(id)) return level.get(id);
+    if (seen.has(id)) return 0; // defensive: cycles are rejected by the server
+    seen.add(id);
+    const v = Math.max(-1, ...deps.get(id).map((d) => lv(d, seen))) + 1;
+    level.set(id, v); return v;
+  };
+  nodes.forEach((n) => lv(n.id));
+  const cols = [];
+  for (const n of nodes) (cols[level.get(n.id)] ??= []).push(n);
+  const pos = new Map();
+  cols.forEach((col, x) => col.forEach((n, y) => pos.set(n.id, { x: PAD + x * (W + GX), y: PAD + y * (H + GY) })));
+  const width = PAD * 2 + cols.length * W + Math.max(0, cols.length - 1) * GX;
+  const height = PAD * 2 + Math.max(1, ...cols.map((c) => c.length)) * (H + GY) - GY;
+  const el = (tag, attrs = {}, ...kids) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v); e.append(...kids); return e; };
+  const svg = el('svg', { class: 'dag', viewBox: `0 0 ${width} ${height}`, width, height, role: 'img', 'aria-label': `Граф залежностей: ${nodes.length} задач` });
+  svg.append(el('defs', {}, el('marker', { id: 'dag-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, el('path', { d: 'M0 0L10 5L0 10z', class: 'dag-arrowhead' }))));
+  for (const [f, t] of edges) {
+    const a = pos.get(f), b = pos.get(t);
+    if (!a || !b) continue;
+    const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2, mx = (x1 + x2) / 2;
+    svg.append(el('path', { d: `M${x1} ${y1}C${mx} ${y1} ${mx} ${y2} ${x2 - 2} ${y2}`, class: 'dag-edge', 'marker-end': 'url(#dag-arrow)' }));
+  }
+  for (const n of nodes) {
+    const p = pos.get(n.id);
+    const g = el('g', { class: cx('dag-node', `t-${n.tone || 'neutral'}`, selected === n.id && 'sel'), transform: `translate(${p.x} ${p.y})`, tabindex: 0, role: 'button', 'aria-label': `${n.label}${n.sub ? ', ' + n.sub : ''}` });
+    const cut = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
+    g.append(el('title', {}, n.label), el('rect', { width: W, height: H, rx: 12 }),
+      el('text', { x: 12, y: 23, class: 'dag-label' }, cut(n.label, 26)), el('text', { x: 12, y: 43, class: 'dag-sub' }, cut(n.sub || '', 30)));
+    if (onNode) { g.addEventListener('click', () => onNode(n)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNode(n); } }); }
+    svg.append(g);
+  }
+  return h('div', { class: 'dag-wrap' }, svg);
+}

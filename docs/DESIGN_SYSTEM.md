@@ -48,6 +48,8 @@
 | `Table({columns, rows, onRowClick, selected, empty})` | таблиця; ≤720px перетворюється на список карток (`data-label`) |
 | `EmptyState({icon, title, text, action})` | порожні стани з дією |
 | `ItemCard({icon, title, subtitle, status, body, footer})` | картка сутності (агент, пристрій, елемент) |
+| `Kanban({columns, card, empty})` | дошка за статусами; колонки прокручуються горизонтально на вузьких екранах |
+| `DagGraph({nodes, edges, onNode, selected})` | inline-SVG граф залежностей: колонка = довжина ланцюжка залежностей, рамка вузла — тон статусу, Enter/пробіл відкриває вузол |
 | `ActivityFeed(items)` | стрічка подій |
 | `openModal`, `confirmModal`, `promptModal` | модальні вікна на нативному `<dialog>` (фокус, Esc) |
 | `DropdownMenu({label}, items)` | меню на `<details>` |
