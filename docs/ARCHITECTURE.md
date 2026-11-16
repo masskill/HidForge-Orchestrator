@@ -1,4 +1,4 @@
-# Архітектура HidForge Orchestrator (v0.3)
+# Архітектура HidForge Orchestrator (v0.5)
 
 ```
  Browser UI (web/*.js)  ── REST + SSE (127.0.0.1, token for mutations) ──┐

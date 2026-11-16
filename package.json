@@ -1,6 +1,6 @@
 {
   "name": "hidforge-orchestrator",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Local Windows-first orchestrator for AI coding CLI agents",
   "type": "module",

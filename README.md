@@ -2,7 +2,7 @@
 
 Локальний Windows-first оркестратор для AI-агентів програмування (Claude Code, Codex CLI, Antigravity `agy`, Cursor Agent CLI). Велика ціль → DAG задач → паралельні агенти в ізольованих git worktree → незалежні перевірки → ручний `Approve & Merge` → один цілісний репозиторій. Стан переживає перезапуск.
 
-**Статус: v0.3.** Ядро, Mock Agent, реальні адаптери Claude Code та agy перевірені наскрізно; LLM-планер (ціль → DAG чернеток) перевірено на Claude Code та agy; AI-рецензент (QA + Security) перевірено на Claude Code та agy. Деталі: [docs/TEST_REPORT.md](docs/TEST_REPORT.md), [docs/ROADMAP.md](docs/ROADMAP.md).
+**Статус: v0.5.** Ядро, Mock Agent, реальні адаптери Claude Code та agy перевірені наскрізно; Codex — read-only (запис блокує його Windows-sandbox), Cursor — з явним дозволом довіри до worktree. LLM-планер, AI-рецензент QA + Security, бюджети й облік витрат, шаблони ролей, kanban і граф DAG, Integrator, звіти й журнал рішень (ADR), запуск без термінала, інсталятор, оновлення, діагностика й резервні копії. JSON-плагіни (Gemini CLI, OpenCode) і WSL2 реалізовано, але на реальних CLI/дистрибутиві не перевірено. Деталі: [docs/TEST_REPORT.md](docs/TEST_REPORT.md), [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Вимоги
 - Windows 10/11 x64 (Linux/macOS теж мають працювати, але не перевірялися)
