@@ -11,7 +11,7 @@
 | `web/styles/ui.css` | База, AppShell, усі компоненти, адаптивність |
 | `web/ui.js` | Компоненти як функції, що повертають DOM-вузли |
 | `web/index.html` | Каркас AppShell |
-| `web/app.js` | Роутер (`#/overview`, `#/tasks[/id]`, `#/planner`, `#/agents`, `#/costs`, `#/reports`, `#/system`, `#/settings`) і сторінки, зібрані з компонентів |
+| `web/app.js` | Роутер (`#/projects`, `#/overview`, `#/tasks[/id]`, `#/planner`, `#/agents`, `#/activity`, `#/costs`, `#/reports`, `#/system`, `#/settings`) і сторінки, зібрані з компонентів |
 | `web/theme.js` | Тема до першого рендеру (без «спалаху») |
 
 ## Токени (темна тема)
@@ -48,11 +48,12 @@
 | `Segmented(items, active, onChange)` | фільтр-перемикач у стилі вкладок |
 | `Table({columns, rows, onRowClick, selected, empty})` | таблиця; ≤720px перетворюється на список карток (`data-label`) |
 | `EmptyState({icon, title, text, action})` | порожні стани з дією |
-| `ItemCard({icon, title, subtitle, status, body, footer})` | картка сутності (агент, пристрій, елемент) |
+| `ItemCard({icon, title, subtitle, status, body, footer, class})` | картка сутності (агент, проєкт, елемент) |
+| `EventCard({id, ts, time, label, rawType, tone, task, summary, data})` | рядок журналу подій; повний JSON у `<details>` створюється лише при відкритті |
 | `Kanban({columns, card, empty})` | дошка за статусами; колонки прокручуються горизонтально на вузьких екранах |
 | `DagGraph({nodes, edges, onNode, selected})` | inline-SVG граф залежностей: колонка = довжина ланцюжка залежностей, рамка вузла — тон статусу, Enter/пробіл відкриває вузол |
 | `ActivityFeed(items)` | стрічка подій |
-| `openModal`, `confirmModal`, `promptModal` | модальні вікна на нативному `<dialog>` (фокус, Esc) |
+| `openModal`, `confirmModal`, `promptModal` | модальні вікна на нативному `<dialog>` (фокус, Esc); `promptModal(label, {value})` — з початковим текстом |
 | `DropdownMenu({label}, items)` | меню на `<details>` |
 | `toast(msg, tone)` | сповіщення (`aria-live`) |
 | `icon(name)`, `logo()` | власні stroke-іконки 24×24 і знак продукту |

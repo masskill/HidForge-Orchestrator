@@ -19,6 +19,7 @@ const cx = (...c) => c.filter(Boolean).join(' ');
 
 // ---------------------------------------------------------------- icons (original, 24×24 stroke)
 const ICONS = {
+  projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h9a2 2 0 0 1 2 2v3M3 10v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zM8 15h8M12 12v6',
   overview: 'M4 4h6v7H4zM14 4h6v4h-6zM14 12h6v8h-6zM4 15h6v5H4z',
   tasks: 'M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2',
   planner: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z',
@@ -129,7 +130,7 @@ export const StatLink = ({ href, label, value, hint, tone }) => h('a',
 export const InfoList = (rows) => h('dl', { class: 'info' }, ...rows.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v ?? '—')]));
 /** ItemCard({ icon, title, subtitle, status, off, body, footer }) — entity card (agent, device, item). */
 export function ItemCard(o) {
-  return h('article', { class: 'item' },
+  return h('article', { class: cx('item', o.class) },
     h('div', { class: 'item-head' }, o.icon ? h('div', { class: cx('ic', o.off && 'off') }, icon(o.icon)) : null,
       h('div', { class: 't' }, h('strong', { class: 'wrap' }, o.title), o.subtitle ? h('span', { class: 'wrap' }, o.subtitle) : null), o.status || null),
     o.body || null, o.footer ? h('div', { class: 'row' }, o.footer) : null);
@@ -227,7 +228,7 @@ export function confirmModal(text, o = {}) {
 /** promptModal(label, { title, ok, placeholder }) → Promise<string|null> */
 export function promptModal(label, o = {}) {
   return new Promise((resolve) => {
-    const ta = Textarea('', { class: 'prose', placeholder: o.placeholder || '' });
+    const ta = Textarea(o.value ?? '', { class: 'prose', placeholder: o.placeholder || '' });
     openModal({ title: o.title || label, body: Field(label, ta),
       actions: (c) => [GhostButton({ onClick: () => { c(); resolve(null); } }, 'Скасувати'),
         PrimaryButton({ onClick: () => { c(); resolve(ta.value); } }, o.ok || 'Надіслати')] });
@@ -257,6 +258,28 @@ export function toast(msg, tone = 'info') {
   const t = h('div', { class: cx('toast', `t-${tone}`) }, icon(tone === 'danger' ? 'alert' : tone === 'success' ? 'check' : 'activity'), h('div', {}, msg));
   box.append(t);
   setTimeout(() => t.remove(), tone === 'danger' ? 8000 : 4500);
+}
+
+// ---------------------------------------------------------------- activity event row
+/** EventCard({ id, ts, time, label, rawType, tone, task, summary, data }) — safe log entry. */
+export function EventCard(o) {
+  // The full JSON is created only when opened; up to 2000 collapsed events remain inexpensive.
+  const pre = h('pre', { class: 'activity-json' });
+  const details = h('details', { class: 'activity-details', 'data-event-id': String(o.id) },
+    h('summary', {}, 'Повні дані події'), pre);
+  details.addEventListener('toggle', () => {
+    if (details.open && !details.dataset.loaded) {
+      pre.textContent = JSON.stringify(o.data ?? {}, null, 2);
+      details.dataset.loaded = 'true';
+    }
+  });
+  return h('article', { class: 'activity-entry' },
+    h('div', { class: 'activity-head' },
+      h('time', { class: 'mono muted', datetime: o.ts }, o.time),
+      Badge(o.label, o.tone || 'neutral', { title: o.rawType }),
+      o.task || null),
+    h('div', { class: 'activity-summary' }, o.summary),
+    details);
 }
 
 // ---------------------------------------------------------------- Kanban

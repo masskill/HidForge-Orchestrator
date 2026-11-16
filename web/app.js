@@ -3,7 +3,7 @@ import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
   PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
-  Kanban, DagGraph, statusTone,
+  Kanban, DagGraph, EventCard, statusTone,
 } from './ui.js';
 
 const TOKEN = document.querySelector('meta[name="hidforge-token"]').content;
@@ -13,13 +13,17 @@ const state = {
   projects: [], agents: null, settings: null, projectId: null, project: null, tasks: [], plans: [], activity: [],
   page: 'overview', taskId: null, editing: null, filter: ls.get('hf-filter') || 'all', view: ls.get('hf-view') || 'table', query: '', showCanceled: false,
   detailTab: 'log', reportsTab: 'report', reportsData: null, diag: null, es: null, live: false, costs: null, models: {},
+  projectsQuery: '', projectSummaries: {}, projectSummariesPending: {},
+  activityLog: null, activityFilter: 'all', activityTaskQuery: '', activityShowOutput: false,
 };
 const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'];
 const PAGES = [
+  { id: 'projects', label: 'Проєкти', icon: 'projects' },
   { id: 'overview', label: 'Огляд', icon: 'overview' },
   { id: 'tasks', label: 'Задачі', icon: 'tasks' },
   { id: 'planner', label: 'AI-планер', icon: 'planner' },
   { id: 'agents', label: 'Агенти', icon: 'agents' },
+  { id: 'activity', label: 'Журнал подій', icon: 'activity' },
   { id: 'costs', label: 'Витрати', icon: 'costs' },
   { id: 'reports', label: 'Звіти й рішення', icon: 'report' },
   { id: 'system', label: 'Система', icon: 'system' },
@@ -122,7 +126,11 @@ function addProjectModal() {
 }
 
 // ---------------------------------------------------------------- data
-async function loadProjects() { state.projects = await api('GET', '/api/projects'); }
+async function loadProjects() {
+  state.projects = await api('GET', '/api/projects');
+  const ids = new Set(state.projects.map((p) => String(p.id)));
+  for (const id of Object.keys(state.projectSummaries)) if (!ids.has(id)) delete state.projectSummaries[id];
+}
 async function loadAgents(refresh = false) { state.agents = await api('GET', '/api/agents' + (refresh ? '?refresh=1' : '')); }
 async function loadSettings() { state.settings = await api('GET', '/api/settings'); }
 async function reloadProject() {
@@ -131,6 +139,7 @@ async function reloadProject() {
     api('GET', `/api/projects/${state.projectId}`), api('GET', `/api/projects/${state.projectId}/plans`),
     api('GET', `/api/events?projectId=${state.projectId}&type=task.status&limit=100000`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
+  state.projectSummaries[project.id] = projectTaskCounts(tasks);
   state.costs = await api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null);
 }
 async function selectProject(id) {
@@ -152,10 +161,10 @@ function route() {
 function render() {
   renderShell();
   const pg = $('#page');
-  const needsProject = ['overview', 'tasks', 'planner', 'costs', 'reports'].includes(state.page);
+  const needsProject = ['overview', 'tasks', 'planner', 'activity', 'costs', 'reports'].includes(state.page);
   if (needsProject && !state.project) { pg.replaceChildren(noProject()); return; }
-  ({ overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage, costs: costsPage,
-    reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
+  ({ projects: projectsPage, overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage,
+    activity: activityPage, costs: costsPage, reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
 }
 const noProject = () => PanelCard({}, EmptyState({ icon: 'folder', title: 'Проєкт не відкрито',
   text: 'Відкрийте локальний Git-репозиторій або створіть демо-проєкт, щоб планувати й запускати задачі агентів.',
@@ -166,6 +175,120 @@ const runPlanButton = () => {
   return PrimaryButton({ icon: 'play', disabled: !drafts, onClick: act(async () => { await api('POST', `/api/projects/${state.projectId}/submit-all`); await reloadProject(); render(); }) }, `Запустити план (${drafts})`);
 };
 const newTaskButton = () => SecondaryButton({ icon: 'plus', onClick: () => { state.editing = 'new'; go('#/tasks'); render(); } }, 'Задача');
+
+// ---------------------------------------------------------------- page: projects
+/** Project cards are cached so SSE refreshes never refetch every repository. */
+function projectTaskCounts(tasks = []) {
+  const countStatus = (statuses) => tasks.filter((t) => statuses.includes(t.status)).length;
+  return { active: countStatus(ACTIVE), attention: countStatus(ATTENTION), merged: countStatus(['merged']),
+    problems: countStatus(PROBLEM) };
+}
+
+async function loadProjectSummaries() {
+  const missing = state.projects.filter((p) => state.projectSummaries[p.id] == null && !state.projectSummariesPending[p.id]);
+  await Promise.all(missing.map(async (p) => {
+    state.projectSummariesPending[p.id] = true;
+    try {
+      const result = await api('GET', `/api/projects/${p.id}`);
+      state.projectSummaries[p.id] = projectTaskCounts(result.tasks || []);
+    } catch (e) {
+      state.projectSummaries[p.id] = { error: e.message };
+    } finally {
+      delete state.projectSummariesPending[p.id];
+      if (state.page === 'projects') renderProjectCards();
+    }
+  }));
+}
+
+const createDemoProject = act(async () => {
+  const p = await api('POST', '/api/demo');
+  await loadProjects();
+  await selectProject(p.id);
+  go('#/overview');
+  toast('Демо-проєкт створено', 'success');
+});
+
+function projectButtons() {
+  return [
+    SecondaryButton({ icon: 'folder', onClick: addProjectModal }, 'Відкрити проєкт'),
+    PrimaryButton({ icon: 'plus', onClick: createDemoProject }, 'Створити демо-проєкт'),
+  ];
+}
+
+const projectDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? (value || '—') : date.toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' });
+};
+
+async function editProjectGoal(p) {
+  const goal = await promptModal('Ціль проєкту', {
+    title: `Змінити ціль · ${p.name}`, ok: 'Зберегти', value: p.goal || '',
+  });
+  if (goal === null || goal === (p.goal || '')) return;
+  await api('PATCH', `/api/projects/${p.id}`, { goal });
+  await loadProjects();
+  if (state.projectId === p.id) await reloadProject();
+  if (state.page === 'projects') { renderProjectCards(); renderShell(); }
+  else render();
+  toast('Ціль проєкту збережено', 'success');
+}
+
+function renderProjectCards() {
+  const cards = $('#projectCards');
+  if (!cards || state.page !== 'projects') return;
+  const query = state.projectsQuery.trim().toLowerCase();
+  const projects = state.projects.filter((p) => `${p.name} ${p.repoPath}`.toLowerCase().includes(query));
+  cards.replaceChildren(...(projects.length ? projects.map((p) => {
+    const summary = state.projectSummaries[p.id];
+    const counters = summary?.error ? Badge('Статистика недоступна', 'danger', { title: summary.error })
+      : summary ? h('div', { class: 'project-counts row' },
+        Badge(`Активні: ${summary.active}`, 'info'),
+        Badge(`Увага: ${summary.attention}`, 'warning'),
+        Badge(`Злито: ${summary.merged}`, 'success'),
+        Badge(`Проблеми: ${summary.problems}`, summary.problems ? 'danger' : 'neutral'))
+      : h('span', { class: 'muted' }, 'Завантаження статистики задач…');
+    return ItemCard({
+      class: 'project-card', icon: 'projects', title: p.name,
+      status: state.projectId === p.id ? Badge('Активний', 'success') : null,
+      body: h('div', { class: 'stack' },
+        InfoList([
+          ['Репозиторій', h('code', { class: 'wrap' }, p.repoPath || '—')],
+          ['Базова гілка', h('code', { class: 'wrap' }, p.baseBranch || '—')],
+          ['Ціль', h('div', { class: 'pre-wrap' }, p.goal || 'Не задано')],
+          ['Бюджет', p.budgetUsd == null ? 'без ліміту' : usd(p.budgetUsd)],
+          ['Створено', h('time', { datetime: p.createdAt || '' }, projectDate(p.createdAt))],
+        ]),
+        counters),
+      footer: [
+        PrimaryButton({ icon: 'folder', size: 'sm', onClick: act(async () => {
+          await selectProject(p.id);
+          go('#/overview');
+        }) }, 'Відкрити'),
+        SecondaryButton({ icon: 'edit', size: 'sm', onClick: act(() => editProjectGoal(p)) }, 'Змінити ціль'),
+      ],
+    });
+  }) : [PanelCard({}, EmptyState({ icon: 'search', title: 'Проєктів не знайдено',
+    text: 'Спробуйте іншу назву або шлях до репозиторію.' }))]));
+}
+
+function projectsPage() {
+  const n = state.projects.length;
+  const noun = n % 100 >= 11 && n % 100 <= 14 ? 'проєктів'
+    : n % 10 === 1 ? 'проєкт' : n % 10 >= 2 && n % 10 <= 4 ? 'проєкти' : 'проєктів';
+  mount(
+    PageHeader({ title: 'Проєкти', subtitle: 'Робочі репозиторії, цілі та стан задач',
+      meta: Badge(`${n} ${noun}`, 'neutral', { plain: true }), actions: projectButtons() }),
+    state.projects.length ? h('div', { class: 'project-search' },
+      SearchInput({ placeholder: 'Пошук за назвою або шляхом…', value: state.projectsQuery,
+        onInput: (e) => { state.projectsQuery = e.target.value; renderProjectCards(); } })) : null,
+    state.projects.length ? h('div', { id: 'projectCards', class: 'grid project-grid' })
+      : PanelCard({}, EmptyState({ icon: 'projects', title: 'Проєктів ще немає',
+        text: 'Відкрийте Git-репозиторій або створіть демо-проєкт для знайомства з HidForge.',
+        action: h('div', { class: 'row' }, projectButtons()) })),
+  );
+  renderProjectCards();
+  if (state.projects.length) void loadProjectSummaries();
+}
 
 // ---------------------------------------------------------------- page: overview
 /** Open the full report and ADR workspace from the overview. */
@@ -220,6 +343,227 @@ function costsPanel() {
       { label: 'Токени вводу', render: (x) => h('span', { class: 'mono' }, x.inputTokens.toLocaleString('uk-UA')) },
       { label: 'Токени виводу', render: (x) => h('span', { class: 'mono' }, x.outputTokens.toLocaleString('uk-UA')) },
     ], rows: c.byProvider }));
+}
+
+// ---------------------------------------------------------------- page: activity
+const ACTIVITY_PAGE_SIZE = 200;
+const ACTIVITY_CACHE_LIMIT = 2000;
+const ACTIVITY_FIRST_BEFORE = Number.MAX_SAFE_INTEGER;
+const ACTIVITY_FILTERS = [
+  ['all', 'Усі'], ['task', 'Задачі'], ['run', 'Запуски'], ['review', 'Рецензії'],
+  ['plan', 'Планер'], ['error', 'Помилки'],
+];
+const EVENT_LABELS = {
+  'project.created': 'Проєкт створено', 'task.created': 'Задачу створено', 'task.deleted': 'Задачу видалено',
+  'task.status': 'Статус задачі', 'task.routed': 'Маршрутизація', 'task.evidence': 'Докази',
+  'run.started': 'Запуск агента', 'run.output': 'Вивід агента', 'run.recovered': 'Відновлення запуску',
+  'review.started': 'AI-рецензія', 'review.status': 'Статус рецензії', 'review.output': 'Вивід рецензента',
+  'plan.started': 'Планування', 'plan.status': 'Статус плану', 'plan.output': 'Вивід планера',
+  'integration.failed': 'Помилка інтеграції', 'scheduler.error': 'Помилка планувальника задач',
+};
+const isOutputEvent = (e) => e.type.endsWith('.output');
+const isErrorEvent = (e) => e.type.endsWith('.failed') || e.type.endsWith('.error') || e.data?.ok === false
+  || ['failed', 'error', 'blocked'].includes(e.data?.status) || ['failed', 'blocked'].includes(e.data?.to);
+const eventTone = (e) => isOutputEvent(e) ? 'neutral' : isErrorEvent(e) ? 'danger'
+  : ['succeeded', 'merged'].includes(e.data?.status) || ['succeeded', 'merged'].includes(e.data?.to) ? 'success'
+    : e.type === 'task.status' || e.type === 'review.status' || e.type === 'plan.status' ? 'info' : 'neutral';
+
+function activityStore(pid) {
+  if (!state.activityLog || state.activityLog.pid !== pid) {
+    state.activityLog = { pid, events: [], loaded: false, loading: false, hasMore: false, error: null, unread: 0 };
+  }
+  return state.activityLog;
+}
+
+function activitySummary(e) {
+  const d = e.data || {};
+  const note = d.note || d.reason || d.error || d.message;
+  const withNote = (s) => `${s}${note ? ` · ${String(note)}` : ''}`;
+  switch (e.type) {
+    case 'project.created': return `Створено проєкт${d.name ? ` «${d.name}»` : ''}`;
+    case 'task.created': return `Створено задачу${d.title ? ` «${d.title}»` : ''}`;
+    case 'task.deleted': return withNote('Задачу видалено');
+    case 'task.status': return withNote(`статус → ${STATUS_LABEL[d.to] || d.to || 'невідомий'}`);
+    case 'task.routed': return withNote(`Призначено агенту: ${d.provider || d.to || 'автовибір'}`);
+    case 'task.evidence': return withNote(d.summary || 'Додано результати перевірки');
+    case 'run.started': return `Агент: ${d.provider || d.command?.split(/[\\/]/).pop() || 'невідомий'} · спроба #${d.attempt ?? '—'}`;
+    case 'run.recovered': return withNote('Відновлено перерваний запуск');
+    case 'review.started': return `Рецензент: ${d.provider || 'невідомий'} · спроба #${d.attempt ?? '—'}`;
+    case 'review.status': return withNote(`Рецензія: ${d.status || 'оновлено'}${d.verdict ? ` · ${d.verdict}` : ''}`);
+    case 'plan.started': return `Планер: ${d.provider || 'автовибір'}`;
+    case 'plan.status': return withNote(`План: ${d.status || 'оновлено'}`);
+    case 'integration.failed': return withNote('Не вдалося інтегрувати зміни');
+    case 'scheduler.error': return withNote('Помилка планувальника задач');
+    default:
+      if (isOutputEvent(e)) {
+        const text = String(d.text || '').replace(/\s+/g, ' ').trim();
+        return text.length > 160 ? `${text.slice(0, 160)}…` : text || 'Порожній вивід';
+      }
+      return String(d.summary || note || 'Подія записана в журнал').slice(0, 240);
+  }
+}
+
+function activityMatches(e) {
+  if (!state.activityShowOutput && isOutputEvent(e)) return false;
+  const filter = state.activityFilter;
+  if (filter === 'error' && !isErrorEvent(e)) return false;
+  if (filter !== 'all' && filter !== 'error' && !e.type.startsWith(`${filter}.`)) return false;
+  const taskQuery = state.activityTaskQuery.trim();
+  return !taskQuery || String(e.taskId ?? '') === taskQuery;
+}
+
+const filteredActivity = () => (state.activityLog?.events || []).filter(activityMatches);
+function activityClock(ts) {
+  const date = new Date(ts);
+  return Number.isNaN(date.getTime()) ? ts : date.toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+/** Merge live and paged events by event ID, newest first, bounded to 2000. */
+function mergeActivityEvents(current, incoming) {
+  const byId = new Map();
+  for (const e of [...current, ...incoming]) if (Number.isSafeInteger(e.id)) byId.set(e.id, e);
+  return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, ACTIVITY_CACHE_LIMIT);
+}
+
+function updateActivityControls() {
+  if (state.page !== 'activity') return;
+  const log = activityStore(state.projectId);
+  const counts = $('#activityCounts');
+  if (counts) counts.replaceChildren(...clean(
+    h('span', { class: 'muted' }, `Показано ${filteredActivity().length} із ${log.events.length} завантажених`),
+    log.unread ? SecondaryButton({ icon: 'refresh', size: 'sm', onClick: () => {
+      const feed = $('#activityStream'); if (feed) feed.scrollTop = 0;
+      log.unread = 0; updateActivityControls();
+    } }, `${log.unread} нових · До початку`) : null,
+  ));
+  const footer = $('#activityFooter');
+  if (footer) footer.replaceChildren(...clean(
+    log.error ? h('p', { class: 'text-2 wrap' }, `Помилка завантаження: ${log.error}`) : null,
+    log.hasMore && log.events.length < ACTIVITY_CACHE_LIMIT
+      ? SecondaryButton({ icon: 'refresh', disabled: log.loading, onClick: act(() => loadActivityEvents(false)) },
+        log.loading ? 'Завантаження…' : 'Завантажити старіші') : null,
+    log.events.length === ACTIVITY_CACHE_LIMIT ? h('span', { class: 'muted' }, 'У кеші максимум 2000 подій.') : null,
+  ));
+}
+
+function renderActivityFeed({ resetScroll = false, keepPosition = false } = {}) {
+  const feed = $('#activityStream');
+  if (!feed || state.page !== 'activity' || state.activityLog?.pid !== state.projectId) return;
+  const log = state.activityLog;
+  const beforeHeight = feed.scrollHeight;
+  const beforeTop = feed.scrollTop;
+  const atTop = beforeTop <= 40 || resetScroll;
+  const opened = new Set([...feed.querySelectorAll('details[open][data-event-id]')].map((el) => el.dataset.eventId));
+  const visible = filteredActivity();
+  feed.replaceChildren(...(visible.length ? visible.map((e) => {
+    const task = e.taskId == null ? null : h('a', { class: 'activity-task', href: `#/tasks/${e.taskId}` }, `Задача #${e.taskId}`);
+    const row = EventCard({ id: e.id, ts: e.ts, time: activityClock(e.ts),
+      label: EVENT_LABELS[e.type] || e.type, rawType: e.type, tone: eventTone(e), task,
+      summary: activitySummary(e), data: e.data });
+    const details = row.querySelector('details');
+    if (opened.has(String(e.id))) details.open = true;
+    return row;
+  }) : [EmptyState({ icon: 'activity', title: log.error ? 'Не вдалося завантажити події'
+    : !log.loaded ? 'Завантаження подій…' : 'Подій не знайдено',
+    text: log.error || (log.loaded ? 'Спробуйте змінити фільтри або завантажити старіші події.'
+      : 'Завантажуємо журнал подій цього проєкту.') })]));
+  if (atTop) { feed.scrollTop = 0; if (log.unread) log.unread = 0; }
+  else feed.scrollTop = keepPosition ? beforeTop : Math.max(0, beforeTop + feed.scrollHeight - beforeHeight);
+  updateActivityControls();
+}
+
+let activityPaintQueued = false;
+function scheduleActivityPaint() {
+  if (activityPaintQueued) return;
+  activityPaintQueued = true;
+  requestAnimationFrame(() => { activityPaintQueued = false; renderActivityFeed(); });
+}
+
+function addLiveActivityEvent(e) {
+  const log = state.activityLog;
+  if (!log || log.pid !== state.projectId || !Number.isSafeInteger(e.id)) return;
+  if (log.events.some((x) => x.id === e.id)) return;
+  const feed = $('#activityStream');
+  const wasBelow = Boolean(feed && feed.scrollTop > 40);
+  log.events = mergeActivityEvents(log.events, [e]);
+  if (state.page === 'activity') {
+    if (wasBelow && activityMatches(e)) log.unread++;
+    scheduleActivityPaint();
+  }
+}
+
+async function loadActivityEvents(reset = false) {
+  const pid = state.projectId;
+  const log = activityStore(pid);
+  if (log.loading || (!reset && (!log.hasMore || !log.events.length))) return;
+  const before = reset ? ACTIVITY_FIRST_BEFORE : Math.min(...log.events.map((e) => e.id));
+  const newestAtStart = log.events[0]?.id ?? 0;
+  log.loading = true;
+  log.error = null;
+  updateActivityControls();
+  try {
+    const events = await api('GET', `/api/events?projectId=${pid}&before=${before}&limit=${ACTIVITY_PAGE_SIZE}`);
+    if (!Array.isArray(events)) throw new Error('Сервер повернув некоректний список подій');
+    if (state.activityLog !== log || state.projectId !== pid) return;
+    const baseline = reset ? log.events.filter((e) => e.id > newestAtStart) : log.events;
+    log.events = mergeActivityEvents(baseline, events);
+    log.loaded = true;
+    log.hasMore = events.length === ACTIVITY_PAGE_SIZE;
+    log.unread = reset ? 0 : log.unread;
+    renderActivityFeed({ resetScroll: reset, keepPosition: !reset });
+  } catch (e) {
+    log.error = e.message;
+    if (state.activityLog === log && state.page === 'activity') renderActivityFeed();
+    toast(`Не вдалося завантажити події: ${e.message}`, 'danger');
+  } finally {
+    log.loading = false;
+    if (state.activityLog === log && state.page === 'activity') updateActivityControls();
+  }
+}
+
+function downloadActivityJson() {
+  const events = filteredActivity();
+  const filename = `hidforge-events-${state.projectId}-${new Date().toISOString().slice(0, 10)}.json`;
+  const href = URL.createObjectURL(new Blob([JSON.stringify(events, null, 2)], { type: 'application/json;charset=utf-8' }));
+  const a = h('a', { href, download: filename });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+function activityPage() {
+  const log = activityStore(state.projectId);
+  const filter = Select(ACTIVITY_FILTERS, state.activityFilter, { onchange: (e) => {
+    state.activityFilter = e.target.value;
+    log.unread = 0; renderActivityFeed({ resetScroll: true });
+  } });
+  const task = TextInput({ type: 'number', min: 1, step: 1, placeholder: 'Усі задачі',
+    value: state.activityTaskQuery, oninput: (e) => {
+      state.activityTaskQuery = e.target.value;
+      log.unread = 0; renderActivityFeed({ resetScroll: true });
+    } });
+  const feed = h('div', { id: 'activityStream', class: 'activity-stream', role: 'feed',
+    'aria-label': 'Журнал подій', tabindex: 0 });
+  feed.addEventListener('scroll', () => {
+    if (feed.scrollTop <= 40 && log.unread) { log.unread = 0; updateActivityControls(); }
+  });
+  mount(
+    PageHeader({ title: 'Журнал подій', subtitle: 'Історія дій агентів, запусків, рецензій і помилок',
+      meta: projectMeta(state.project), actions: [
+        SecondaryButton({ icon: 'refresh', onClick: act(() => loadActivityEvents(true)) }, 'Оновити'),
+        SecondaryButton({ icon: 'report', onClick: downloadActivityJson }, 'Завантажити .json'),
+      ] }),
+    PanelCard({ title: 'Фільтри' }, h('div', { class: 'activity-filters' },
+      Field('Тип подій', filter), Field('Номер задачі', task),
+      Toggle({ label: 'Показувати вивід агентів', checked: state.activityShowOutput, onChange: (value) => {
+        state.activityShowOutput = value;
+        log.unread = 0; renderActivityFeed({ resetScroll: true });
+      } }))),
+    PanelCard({ title: 'Події', subtitle: 'Від новіших до старіших',
+      actions: h('div', { id: 'activityCounts', class: 'row' }) },
+    feed, h('div', { id: 'activityFooter', class: 'activity-footer row' })),
+  );
+  renderActivityFeed();
+  if (!log.loaded && !log.loading) void loadActivityEvents(true);
 }
 
 // ---------------------------------------------------------------- page: costs
@@ -909,13 +1253,18 @@ function connectStream() {
   state.es.onerror = () => { state.live = false; renderShell(); };
   state.es.onmessage = (m) => {
     const e = JSON.parse(m.data);
+    addLiveActivityEvent(e);
     if (e.taskId === state.taskId && state.editing == null) appendLog(e);
     if (e.type === 'plan.output') { appendPlanLog(e); return; }
-    if (e.type === 'run.output' || e.type === 'review.output') return;
+    if (isOutputEvent(e)) return;
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
       if (state.editing != null || document.querySelector('dialog[open]')) return; // never wipe a form or modal in progress
-      reloadProject().then(render).catch(() => {});
+      reloadProject().then(() => {
+        if (state.page === 'activity') { renderShell(); scheduleActivityPaint(); }
+        else if (state.page === 'projects') { renderShell(); renderProjectCards(); }
+        else render();
+      }).catch(() => {});
     }, 150);
   };
 }
