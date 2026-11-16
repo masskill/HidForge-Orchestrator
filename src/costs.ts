@@ -30,8 +30,8 @@ export function projectCosts(store: Store, projectId: number): CostSummary {
     c.outputTokens += t.output;
     map.set(provider, c);
   };
+  for (const r of store.allProjectRuns(projectId)) add(r.provider, 'task', r.usage as Usage);
   for (const t of store.listTasks(projectId)) {
-    for (const r of store.runsForTask(t.id)) add(r.provider, 'task', r.usage as Usage);
     const rv = t.artifacts.aiReview as { provider?: string; usage?: Usage; status?: string } | undefined;
     if (rv?.provider && rv.status !== 'running') add(rv.provider, 'review', rv.usage);
   }

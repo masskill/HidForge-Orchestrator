@@ -137,7 +137,7 @@ async function reloadProject() {
   if (!state.projectId) return;
   const [{ project, tasks }, plans, activity] = await Promise.all([
     api('GET', `/api/projects/${state.projectId}`), api('GET', `/api/projects/${state.projectId}/plans`),
-    api('GET', `/api/events?projectId=${state.projectId}&type=task.status&limit=100000`)]);
+    api('GET', `/api/events?projectId=${state.projectId}&type=task.status&before=9007199254740991&limit=14`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
   state.projectSummaries[project.id] = projectTaskCounts(tasks);
   state.costs = await api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null);

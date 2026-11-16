@@ -82,6 +82,8 @@ test('costs/budget/models HTTP API', async () => {
     assert.deepEqual(st.agentTrust, { cursor: true });
     assert.equal(orch.trusts('cursor'), true);
     assert.equal(orch.trusts('claude'), false);
+    for (const u of [`/api/projects/${project.id}/runs?limit=abc`, '/api/events?before=x', '/api/events?after=NaN'])
+      assert.equal((await call('GET', u)).status, 400, `${u}: bad number is a 400, not a 500`);
   } finally { await srv.close(); await orch.stop(); }
 });
 

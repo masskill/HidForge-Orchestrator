@@ -5,6 +5,8 @@ import path from 'node:path';
 import { buildPrompt, normalizeRoleTemplates, roleTemplate, DEFAULT_ROLE_TEMPLATES } from '../src/contract.ts';
 import { createServer } from '../src/server.ts';
 import { setup, mock, waitStatus } from './helpers.ts';
+import { existsSync } from 'node:fs';
+import { git } from '../src/workspace.ts';
 
 test('role guidance goes into the contract; read-only template adds the read-only rule', () => {
   const p = { goal: 'G' } as never;
@@ -35,6 +37,18 @@ test('scheduler enforces role templates: read-only role, allowed agents', async 
     assert.match(String(tq.feedback), /read-only task modified files/);
     const tb = await waitStatus(orch, be.id, ['failed']);
     assert.match(tb.evidence.at(-1)!.summary, /role Backend may only use: claude/);
+  } finally { await orch.stop(); }
+});
+
+test('approving a task with no changes still removes its worktree and branch', async () => {
+  const { orch, project } = await setup();
+  try {
+    const t = orch.createTask(project.id, { title: 'look only', policy: 'read-only', description: mock({}) });
+    orch.submit(t.id);
+    const r = await waitStatus(orch, t.id, ['review']);
+    assert.equal((await orch.approve(t.id)).status, 'merged');
+    assert.equal(existsSync(r.workspace!), false, 'worktree removed');
+    assert.equal((await git(project.repoPath, ['branch', '--list', r.branch!])).stdout.trim(), '', 'branch removed');
   } finally { await orch.stop(); }
 });
 

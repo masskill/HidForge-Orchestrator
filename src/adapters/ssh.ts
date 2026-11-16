@@ -59,7 +59,8 @@ function paxPath(p: string): Buffer {
 }
 export function* tarEntries(root: string, files: { path: string; mode: number }[]): Generator<Buffer> {
   for (const f of files) {
-    const data = readFileSync(path.join(root, f.path));
+    let data: Buffer;
+    try { data = readFileSync(path.join(root, f.path)); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; throw e; } // deleted after listing
     const plain = /^[\x20-\x7e]{1,100}$/.test(f.path);
     if (!plain) { const x = paxPath(f.path); yield header('PaxHeader', x.length, 0o644, 'x'); yield pad(x); }
     yield header(plain ? f.path : 'hidforge-long-name', data.length, f.mode, '0');
@@ -84,13 +85,20 @@ export async function worktreeFiles(ws: string): Promise<{ path: string; mode: n
 /** Refuse patches that would create symlinks or touch a .git directory. */
 export function checkPatch(patch: string): void {
   if (/^(new file mode|new mode) 120000/m.test(patch)) throw new Error('remote changes contain a symlink; refused');
-  for (const m of patch.matchAll(/^diff --git a\/(.*) b\/(.*)$/gm)) {
-    if ([m[1]!, m[2]!].some((p) => p.split('/').some((s) => s.toLowerCase() === '.git'))) throw new Error(`remote changes touch .git: ${m[2]}`);
+  // Every path-bearing header line, quoted ("a/x y") or not; stops at the hunk/binary body so content lines are ignored.
+  const PATH_LINE = /^(?:diff --git |rename from |rename to |copy from |copy to |--- |\+\+\+ )(.*)$/;
+  const GIT_SEG = /(?:^|[\s"/\\])\.git(?=$|[\s"/\\])/i;
+  let header = false;
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('diff --git ')) header = true;
+    else if (line.startsWith('@@') || line.startsWith('GIT binary patch')) header = false;
+    const m = header ? PATH_LINE.exec(line.replace(/\r$/, '')) : null;
+    if (m && GIT_SEG.test(m[1]!)) throw new Error(`remote changes touch .git: ${m[1]}`);
   }
 }
 
 type Out = { code: number; out: Buffer; err: string };
-function pipe(cmd: string[], args: string[], o: { cwd?: string; input?: Buffer | Iterable<Buffer> | null; timeoutMs: number }): Promise<Out> {
+function pipe(cmd: string[], args: string[], o: { cwd?: string; input?: Buffer | Iterable<Buffer> | null; timeoutMs: number; signal?: AbortSignal }): Promise<Out> {
   const r = resolveCommand(cmd[0]!);
   if (!r) return Promise.resolve({ code: 127, out: Buffer.alloc(0), err: `not found: ${cmd[0]}` });
   return new Promise((resolve) => {
@@ -101,10 +109,16 @@ function pipe(cmd: string[], args: string[], o: { cwd?: string; input?: Buffer |
     child.stderr.on('data', (d: Buffer) => err.push(d));
     child.stdin.on('error', () => {});
     child.on('error', (e) => err.push(Buffer.from(e.message)));
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code: code ?? 124, out: Buffer.concat(out), err: Buffer.concat(err).toString('utf8').trim() }); });
+    const abort = () => child.kill();
+    if (o.signal?.aborted) abort(); else o.signal?.addEventListener('abort', abort, { once: true });
+    child.on('close', (code) => { clearTimeout(timer); o.signal?.removeEventListener('abort', abort); resolve({ code: code ?? 124, out: Buffer.concat(out), err: Buffer.concat(err).toString('utf8').trim() }); });
     if (o.input == null) child.stdin.end();
     else if (Buffer.isBuffer(o.input)) child.stdin.end(o.input);
-    else Readable.from(o.input).pipe(child.stdin);
+    else {
+      const src = Readable.from(o.input); // a read error (file vanished, EACCES) must fail the call, not crash the server
+      src.on('error', (e) => { err.push(Buffer.from(`reading local files: ${e.message}`)); child.kill(); });
+      src.pipe(child.stdin);
+    }
   });
 }
 
@@ -127,7 +141,7 @@ export class SshAdapter implements AgentAdapter {
   private sshArgs(remoteCmd: string): string[] {
     return ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', ...(this.cfg.port ? ['-p', String(this.cfg.port)] : []), '--', this.cfg.host, remoteCmd];
   }
-  private ssh(remoteCmd: string, input: Buffer | Iterable<Buffer> | null, timeoutMs: number) { return pipe(this.transport, this.sshArgs(remoteCmd), { input, timeoutMs }); }
+  private ssh(remoteCmd: string, input: Buffer | Iterable<Buffer> | null, timeoutMs: number, signal?: AbortSignal) { return pipe(this.transport, this.sshArgs(remoteCmd), { input, timeoutMs, signal }); }
   /** One remote directory per local workspace: <remoteDir>/<parent>-<name>, e.g. .hidforge/work/p1-t3. */
   remoteDir(workspace: string): string {
     const k = `${path.basename(path.dirname(workspace))}-${path.basename(workspace)}`.replace(/[^\w.-]/g, '_');
@@ -148,14 +162,15 @@ export class SshAdapter implements AgentAdapter {
   }
 
   /** Upload a fresh snapshot of the worktree and commit it as the remote baseline. Stale dirs (>2 days) are swept. */
-  async prepare(workspace: string): Promise<void> {
+  async prepare(workspace: string, signal?: AbortSignal): Promise<void> {
     const d = shq(this.remoteDir(workspace)); const root = shq(this.cfg.remoteDir);
     const script = [
       'set -e', `mkdir -p ${root}`, `find ${root} -mindepth 1 -maxdepth 1 -mtime +2 -exec rm -rf {} +`,
       `rm -rf ${d}`, `mkdir -p ${d}`, `cd ${d}`, 'tar -xf -', 'git init -q', 'git add -A -f',
       `${GIT_REMOTE} commit -q --no-verify --allow-empty -m 'HidForge baseline'`,
     ].join('; ');
-    const r = await this.ssh(script, tarEntries(workspace, await worktreeFiles(workspace)), 600_000);
+    const r = await this.ssh(script, tarEntries(workspace, await worktreeFiles(workspace)), 600_000, signal);
+    if (signal?.aborted) throw new Error('upload canceled');
     if (r.code !== 0) throw new Error(`uploading the worktree to ${this.cfg.host} failed (exit ${r.code}): ${r.err.slice(0, 500)}`);
   }
 

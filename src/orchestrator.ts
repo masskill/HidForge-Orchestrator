@@ -12,7 +12,7 @@ import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, APP_PLUGINS_DIR, type 
 import { loadPlugins, type PluginLoad } from './adapters/plugin.ts';
 import { WslAdapter, type WslConfig } from './adapters/wsl.ts';
 import { SshAdapter, type SshConfig } from './adapters/ssh.ts';
-import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
+import type { AgentAdapter, AgentEvent, Invocation } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
 import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
 import { Planner } from './planner.ts';
@@ -45,6 +45,8 @@ export class Orchestrator {
   readonly pluginErrors: PluginLoad['errors'];
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
+  /** Runs still uploading to a remote backend (adapter.prepare), by task id. */
+  private readonly preparing = new Map<number, { ac: AbortController; done: Promise<void> }>();
   private readonly pending = new Set<Promise<unknown>>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
@@ -87,6 +89,8 @@ export class Orchestrator {
     await this.tickSettled();
     await this.planner.stop();
     await this.reviewer.stop();
+    for (const up of this.preparing.values()) up.ac.abort();
+    await Promise.all([...this.preparing.values()].map((up) => up.done));
     await Promise.all([...this.handles.values()].map(async (h) => { if (h.child.pid) await killTree(h.child.pid); await h.exited; }));
     await this.idle();
     this.store.db.close();
@@ -168,6 +172,8 @@ export class Orchestrator {
   async cancel(id: number): Promise<Task> {
     const h = [...this.handles.values()].find((x) => x.taskId === id);
     const task = this.store.setStatus(id, 'canceled', {}, 'canceled by user');
+    const up = this.preparing.get(id);
+    if (up) { up.ac.abort(); await up.done; }
     if (h) { h.canceled = true; if (h.child.pid) await killTree(h.child.pid); await h.exited; }
     await this.reviewer.killFor(id);
     return task;
@@ -232,7 +238,10 @@ export class Orchestrator {
     this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: 'Approved by user' });
     if (!t.branch || !t.workspace || !t.baseCommit) return this.store.setStatus(id, 'merged', {}, 'nothing to merge');
     const changed = await this.ws.changedFiles(t.workspace, t.baseCommit);
-    if (changed.length === 0) return this.store.setStatus(id, 'merged', {}, 'no changes (read-only task)');
+    if (changed.length === 0) {
+      await this.ws.remove(p.repoPath, t.workspace, t.branch);
+      return this.store.setStatus(id, 'merged', {}, 'no changes (read-only task)');
+    }
     const mergedDiff = maskSecrets(await this.ws.diff(t.workspace, t.baseCommit)).slice(0, 200_000);
     const res = await this.ws.merge(p.repoPath, p.baseBranch, t.branch, `HidForge: merge task #${t.id} ${t.title}`);
     if (!res.ok) {
@@ -363,24 +372,36 @@ export class Orchestrator {
     this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.started',
       data: { attempt: run.attempt, provider: t.provider, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });
 
+    if (!adapter.prepare) return this.spawnRun(t, p, run, w.workspace, adapter, inv);
+    // Remote upload runs off the tick so the scheduler and timeout checks keep going; cancel/stop abort it.
+    const ac = new AbortController();
+    const upload = (async () => {
+      let error: string | null = null;
+      try { await adapter.prepare!(w.workspace, ac.signal); } catch (e) { error = (e as Error).message; }
+      this.preparing.delete(t.id);
+      const canceled = ac.signal.aborted || this.store.getTask(t.id).status !== 'running';
+      if (!error && !canceled) { this.spawnRun(t, p, run, w.workspace, adapter, inv); return; }
+      this.store.releaseLock(w.workspace);
+      this.store.endRun(run.id, canceled ? 'canceled' : 'failed', { error });
+      if (!canceled) this.failOrRetry(this.store.getTask(t.id), `start failed: ${error}`);
+    })();
+    this.preparing.set(t.id, { ac, done: this.track(upload) });
+    return true;
+  }
+
+  private spawnRun(t: Task, p: Project, run: Run, workspace: string, adapter: AgentAdapter, inv: Invocation): boolean {
     let child: ChildProcess;
     try {
-      if (adapter.prepare) {
-        await adapter.prepare(w.workspace);
-        if (this.store.getTask(t.id).status !== 'running') { // canceled during the upload
-          this.store.releaseLock(w.workspace); this.store.endRun(run.id, 'canceled', {}); return false;
-        }
-      }
-      child = spawnSafe(inv.command, inv.args, { cwd: w.workspace });
+      child = spawnSafe(inv.command, inv.args, { cwd: workspace });
     } catch (e) {
-      this.store.releaseLock(w.workspace);
+      this.store.releaseLock(workspace);
       this.store.endRun(run.id, 'failed', { error: (e as Error).message });
-      this.failOrRetry(this.store.getTask(t.id), `${adapter.prepare ? 'start' : 'spawn'} failed: ${(e as Error).message}`);
+      this.failOrRetry(this.store.getTask(t.id), `spawn failed: ${(e as Error).message}`);
       return false;
     }
     let resolveExit!: () => void;
     const h: Handle = {
-      run, taskId: t.id, workspace: w.workspace, child, adapter, startedAt: Date.now(), lastOutput: Date.now(),
+      run, taskId: t.id, workspace, child, adapter, startedAt: Date.now(), lastOutput: Date.now(),
       timeoutMs: t.timeoutSec * 1000, result: null, killReason: null, canceled: false, done: false,
       exited: new Promise<void>((r) => { resolveExit = r; }),
     };

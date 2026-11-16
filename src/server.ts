@@ -120,7 +120,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       provider: b.provider ? String(b.provider) : undefined, model: b.model ? String(b.model) : null,
     })],
     ['GET', /^\/api\/events$/, (_m, _b, u) => s.events({
-      afterId: Number(u.searchParams.get('after') ?? 0), beforeId: num(u, 'before'), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), type: u.searchParams.get('type') ?? undefined, limit: num(u, 'limit') ?? 2000,
+      afterId: num(u, 'after') ?? 0, beforeId: num(u, 'before'), projectId: num(u, 'projectId'), taskId: num(u, 'taskId'), type: u.searchParams.get('type') ?? undefined, limit: num(u, 'limit') ?? 2000,
     })],
   ];
 
@@ -198,7 +198,13 @@ function budget(v: unknown): number | null {
   if (!Number.isFinite(x) || x <= 0) throw new BadRequest('budgetUsd must be a positive number or null');
   return x;
 }
-function num(u: URL, k: string): number | undefined { const v = u.searchParams.get(k); return v ? Number(v) : undefined; }
+function num(u: URL, k: string): number | undefined {
+  const v = u.searchParams.get(k);
+  if (!v) return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new BadRequest(`${k} must be a number`);
+  return n;
+}
 
 async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   let size = 0;

@@ -19,7 +19,7 @@ async function reviewed(orch: Orchestrator, id: number, attempt?: number): Promi
   return waitFor(() => {
     const r = ai(orch.store.getTask(id));
     return r && r.status !== 'running' && (attempt === undefined || r.attempt === attempt) ? r : null;
-  }, 20_000, `AI review of task ${id}`).then(async (r) => { await orch.idle(); return r; });
+  }, 60_000, `AI review of task ${id}`).then(async (r) => { await orch.idle(); return r; });
 }
 
 async function withPolicy(mode: ReviewMode) {

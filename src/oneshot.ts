@@ -33,8 +33,27 @@ export async function resolveReadOnlyAgent(orch: Orchestrator, provider: string,
 export type OneShotResult = { code: number | null; result: AgentEvent | null; messages: string[]; killReason: string | null };
 export interface OneShot { pid: number | undefined; done: Promise<OneShotResult>; kill(reason: string): Promise<void> }
 
+type RunOpts = { timeoutMs: number; stallMs: number; onEvent: (e: AgentEvent, stream: string) => void };
+
+/** Runs adapter.prepare (remote upload) first when there is one; the session is live — and killable — from the start. */
+export function runOnce(adapter: AgentAdapter, inv: Invocation, cwd: string, o: RunOpts): OneShot {
+  if (!adapter.prepare) return spawnOnce(adapter, inv, cwd, o);
+  const ac = new AbortController();
+  let inner: OneShot | null = null;
+  let killReason: string | null = null;
+  const killed = (): OneShotResult => ({ code: null, result: null, messages: [], killReason });
+  const done = (async () => {
+    try { await adapter.prepare!(cwd, ac.signal); } catch (e) { if (killReason) return killed(); throw e; }
+    if (killReason) return killed();
+    inner = spawnOnce(adapter, inv, cwd, o);
+    return inner.done;
+  })();
+  // ponytail: no pid while uploading; the caller records it only if present.
+  return { get pid() { return inner?.pid; }, done, kill: async (r) => { killReason ??= r; ac.abort(); await inner?.kill(r); } };
+}
+
 // ponytail: task runs in orchestrator.ts have their own supervision (locks, recovery); merge the runners if needed.
-export function runOnce(adapter: AgentAdapter, inv: Invocation, cwd: string, o: { timeoutMs: number; stallMs: number; onEvent: (e: AgentEvent, stream: string) => void }): OneShot {
+function spawnOnce(adapter: AgentAdapter, inv: Invocation, cwd: string, o: RunOpts): OneShot {
   const child = spawnSafe(inv.command, inv.args, { cwd });
   let result: AgentEvent | null = null;
   let killReason: string | null = null;

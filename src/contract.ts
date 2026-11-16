@@ -1,5 +1,7 @@
 // Task contract (prompt) given to a worker, and the verification-command policy.
 import { BadRequest, type Project, type Task } from './store.ts';
+import path from 'node:path';
+import { parseArgv } from './proc.ts';
 
 /** Model ids are passed as a separate argv value after `--model`; reject anything a CLI could read as a flag. */
 const MODEL_RE = /^[A-Za-z0-9][\w.:/@[\],=+-]{0,127}$/;
@@ -100,5 +102,31 @@ export function commandDecision(cmd: string, approved: string[]): CommandDecisio
   if (!c) return { decision: 'deny', reason: 'empty command' };
   if (SHELL_META.test(c)) return { decision: 'deny', reason: 'shell operators are not supported (commands run without a shell)' };
   if (DENY.some((re) => re.test(c))) return { decision: 'deny', reason: 'command is on the hard deny-list' };
+  const why = argvDeny(c);
+  if (why) return { decision: 'deny', reason: why };
   return approved.includes(c) ? { decision: 'allow' } : { decision: 'ask' };
+}
+
+const DENY_EXE = new Set(['rm', 'del', 'erase', 'rmdir', 'rd', 'format', 'shutdown', 'reg', 'regedit', 'sc', 'net', 'netsh', 'bcdedit', 'diskpart', 'takeown', 'icacls',
+  'curl', 'wget', 'iwr', 'irm', 'invoke-webrequest', 'invoke-restmethod', 'powershell', 'pwsh', 'cmd', 'bash', 'sh', 'wsl', 'ssh', 'scp', 'runas', 'mshta', 'rundll32', 'cscript', 'wscript']);
+const GIT_DENY = new Set(['push', 'reset', 'clean', 'checkout', 'rebase', 'filter-branch', 'update-ref']);
+const GIT_OPT_WITH_ARG = new Set(['-C', '--git-dir', '--work-tree', '--namespace']);
+
+/** The string regexes miss quoted names, full paths and git global options: check the argv the command actually runs with. */
+function argvDeny(c: string): string | null {
+  let argv: string[];
+  try { argv = parseArgv(c); } catch (e) { return (e as Error).message; }
+  const exe = path.win32.basename(argv[0] ?? '').toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, '');
+  if (DENY_EXE.has(exe)) return 'command is on the hard deny-list';
+  if (exe === 'git') {
+    for (let i = 1; i < argv.length; i++) {
+      const a = argv[i]!;
+      if (a === '-c' || a.startsWith('--config-env') || a.startsWith('--exec-path')) return 'git config overrides are not allowed in verify commands';
+      if (GIT_OPT_WITH_ARG.has(a)) { i++; continue; }
+      if (a.startsWith('-')) continue;
+      return GIT_DENY.has(a.toLowerCase()) ? 'command is on the hard deny-list' : null;
+    }
+  }
+  if (['npm', 'pnpm', 'yarn'].includes(exe) && argv.some((a) => ['publish', 'login', 'adduser', 'token'].includes(a.toLowerCase()))) return 'command is on the hard deny-list';
+  return null;
 }

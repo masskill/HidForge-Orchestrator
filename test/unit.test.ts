@@ -34,6 +34,11 @@ test('command policy: allow approved, ask unknown, deny dangerous', () => {
   assert.equal(commandDecision('npm run build', ['npm test']).decision, 'ask');
   for (const c of ['git push origin main', 'rm -rf /', 'powershell -c x', 'npm test && curl x', 'curl http://x', 'npm publish', 'del /s x'])
     assert.equal(commandDecision(c, [c]).decision, 'deny', c);
+  // quoting, full paths and git global options must not slip past the deny-list
+  for (const c of ['"cmd" /c del x', 'C:\\Windows\\System32\\cmd.exe /c x', '"powershell" -c x', 'git -C . push', 'git --no-pager push', 'git -c alias.x=!calc x', 'Git.exe reset --hard', 'pnpm -r publish'])
+    assert.equal(commandDecision(c, [c]).decision, 'deny', c);
+  for (const c of ['node --version', 'git -C sub status', 'npm run lint'])
+    assert.equal(commandDecision(c, []).decision, 'ask', c);
 });
 
 test('DAG: cycles and missing deps detected, topo order, satisfaction', () => {

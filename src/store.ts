@@ -264,6 +264,10 @@ export class Store {
   }
   getRun(id: number): Run { return toRun(this.db.prepare('select * from runs where id = ?').get(id) as Row); }
   runsForTask(taskId: number): Run[] { return this.db.prepare('select * from runs where task_id = ? order by id').all(taskId).map((r) => toRun(r as Row)); }
+  /** Every run of a project in one query (cost totals). */
+  allProjectRuns(projectId: number): Run[] {
+    return this.db.prepare('select r.* from runs r join tasks t on t.id = r.task_id where t.project_id = ? order by r.id').all(projectId).map((r) => toRun(r as Row));
+  }
   runsForProject(projectId: number, f: { before?: number; limit?: number; status?: string; provider?: string } = {}): (Run & { taskTitle: string })[] {
     const where = ['t.project_id = ?']; const vals: (number | string)[] = [projectId];
     if (f.before) { where.push('r.id < ?'); vals.push(f.before); }
