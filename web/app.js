@@ -561,6 +561,7 @@ function settingsPage() {
     p ? budgetSettings(p) : null,
     p ? reviewSettings(p) : null,
     trustSettings(),
+    rolesSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
       cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
@@ -579,6 +580,30 @@ function budgetSettings(p) {
       await api('PATCH', `/api/projects/${p.id}`, { budgetUsd: budget.value ? Number(budget.value) : null });
       await reloadProject(); toast('Бюджет збережено', 'success'); render();
     }) }, 'Зберегти')));
+}
+function rolesSettings() {
+  const s = state.settings;
+  if (!s?.roleTemplates) return null;
+  const rows = (s.roles || Object.keys(s.roleTemplates)).map((role) => {
+    const t = s.roleTemplates[role] || { instructions: '', readOnly: false, providers: [] };
+    return { role, instr: Textarea(t.instructions, { 'aria-label': `Інструкції ролі ${role}`, style: 'min-height:60px' }),
+      ro: h('input', { type: 'checkbox', role: 'switch', checked: t.readOnly, 'aria-label': `${role}: лише читання` }),
+      prov: TextInput({ value: t.providers.join(', '), placeholder: 'будь-які', 'aria-label': `${role}: дозволені агенти` }) };
+  });
+  const save = act(async () => {
+    const roleTemplates = Object.fromEntries(rows.map((r) => [r.role, { instructions: r.instr.value, readOnly: r.ro.checked, providers: r.prov.value.split(/[\s,]+/).filter(Boolean) }]));
+    await api('PUT', '/api/settings', { roleTemplates }); await loadSettings(); toast('Шаблони ролей збережено', 'success'); render();
+  });
+  return PanelCard({ flush: true, title: 'Ролі: шаблони й дозволи', subtitle: 'Інструкції додаються в контракт задачі; «лише читання» і дозволені агенти примусово застосовує планувальник' },
+    Table({ columns: [
+      { label: 'Роль', render: (r) => h('strong', {}, r.role) },
+      { label: 'Інструкції для агента', class: 'grow', render: (r) => r.instr },
+      { label: 'Лише читання', render: (r) => h('label', { class: 'toggle' }, r.ro) },
+      { label: 'Дозволені агенти', render: (r) => r.prov },
+    ], rows }),
+    h('div', { class: 'row', style: 'padding:var(--s-4) var(--s-5);border-top:1px solid var(--border)' },
+      h('span', { class: 'text-2', style: 'flex:1;font-size:var(--fs-sm)' }, `Агенти: ${(state.agents || []).map((a) => a.id).join(', ') || '…'}. Порожньо — будь-які.`),
+      PrimaryButton({ icon: 'check', onClick: save }, 'Зберегти ролі')));
 }
 function trustSettings() {
   const trust = state.settings?.agentTrust || {};

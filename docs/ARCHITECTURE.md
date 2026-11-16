@@ -72,6 +72,10 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - Після рестарту активний планер позначається `failed` (його процес убивається) — сесії планування не відновлюються.
 - API: `POST/GET /api/projects/:id/plans`, `GET /api/plans/:id`, `POST /api/plans/:id/{apply,cancel,discard}`.
 
+## Шаблони ролей (`src/contract.ts`)
+- Налаштування `roleTemplates`: для кожної з 7 ролей — `instructions` (розділ «Role guidance» у контракті задачі), `readOnly` (планувальник примусово ставить задачі політику `read-only` і записує це в evidence), `providers` (дозволені агенти; `auto` обирає лише серед них за політикою маршрутизації, явний недозволений агент → задача `failed`).
+- Типові шаблони: «Project Manager/Planner» і «Security Reviewer» — лише читання.
+
 ## AI-рецензент (`src/reviewer.ts`)
 
 ```

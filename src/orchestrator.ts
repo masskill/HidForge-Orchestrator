@@ -11,7 +11,7 @@ import { WorkspaceManager, inspectRepo, checkAllowedPaths, git } from './workspa
 import { AgentRegistry, defaultAdapters, DEFAULT_ROUTING, type RoutingPolicy } from './adapters/index.ts';
 import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
-import { buildPrompt, commandDecision } from './contract.ts';
+import { buildPrompt, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
 import { projectCosts } from './costs.ts';
@@ -286,13 +286,23 @@ export class Orchestrator {
   }
 
   /** Returns true if a worker was started. */
+  roleTemplates(): RoleTemplates { return this.store.getSetting<RoleTemplates>('roleTemplates', {}); }
+
   private async startRun(task: Task): Promise<boolean> {
     let t = task;
+    const tpl = roleTemplate(this.roleTemplates(), t.assignedRole);
     if (t.provider === 'auto') {
-      const picked = await this.registry.pick(this.routingPolicy, this.store.getSetting('routingTable', DEFAULT_ROUTING));
-      if (!picked) { this.failTask(t, `no available agent for routing policy '${this.routingPolicy}'`); return false; }
+      const table = this.store.getSetting('routingTable', DEFAULT_ROUTING);
+      const order = tpl.providers.length ? [...table[this.routingPolicy].filter((p) => tpl.providers.includes(p)), ...tpl.providers.filter((p) => !table[this.routingPolicy].includes(p))] : table[this.routingPolicy];
+      const picked = await this.registry.pick(this.routingPolicy, { ...table, [this.routingPolicy]: order });
+      if (!picked) { this.failTask(t, `no available agent for routing policy '${this.routingPolicy}'${tpl.providers.length ? ` among agents allowed for role ${t.assignedRole} (${tpl.providers.join(', ')})` : ''}`); return false; }
       t = this.store.patchTask(t.id, { provider: picked });
       this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: picked, policy: this.routingPolicy } });
+    }
+    if (tpl.providers.length && !tpl.providers.includes(t.provider)) { this.failTask(t, `role ${t.assignedRole} may only use: ${tpl.providers.join(', ')} (task asks for ${t.provider})`); return false; }
+    if (tpl.readOnly && t.policy !== 'read-only') {
+      t = this.store.patchTask(t.id, { policy: 'read-only' });
+      this.store.addEvidence(t.id, { kind: 'scheduler', ok: true, summary: `Role ${t.assignedRole} is read-only by its template: task policy set to read-only` });
     }
     const adapter = this.registry.get(t.provider);
     const st = (await this.registry.status()).find((s) => s.id === t.provider);
@@ -317,7 +327,7 @@ export class Orchestrator {
     try { run = this.store.beginRun(t, w.workspace, adapter.mock); }
     catch (e) { if (e instanceof Conflict) return false; throw e; }
 
-    const prompt = buildPrompt(t, p, run.attempt);
+    const prompt = buildPrompt(t, p, run.attempt, tpl);
     const inv = adapter.buildInvocation({ prompt, workspace: w.workspace, model: t.model, policy: t.policy, maxBudgetUsd: t.maxBudgetUsd, trustWorkspace: this.trusts(t.provider) });
     this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.started',
       data: { attempt: run.attempt, provider: t.provider, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });

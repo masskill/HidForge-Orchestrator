@@ -3,12 +3,48 @@ import type { Project, Task } from './store.ts';
 
 export const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'] as const;
 
-export function buildPrompt(task: Task, project: Project, attempt: number): string {
+/** Per-role template: extra instructions in the contract + permissions enforced by the scheduler. */
+export interface RoleTemplate { instructions: string; readOnly: boolean; providers: string[] }
+export type RoleTemplates = Record<string, RoleTemplate>;
+
+export const DEFAULT_ROLE_TEMPLATES: RoleTemplates = {
+  'Project Manager/Planner': { instructions: 'Break work into small, verifiable steps. Do not implement features yourself.', readOnly: true, providers: [] },
+  Architect: { instructions: 'Define contracts, interfaces and data shapes first; document decisions next to the code.', readOnly: false, providers: [] },
+  Frontend: { instructions: 'Keep UI accessible (labels, focus, contrast) and consistent with the existing components.', readOnly: false, providers: [] },
+  Backend: { instructions: 'Validate input at boundaries, handle errors explicitly, keep changes covered by tests.', readOnly: false, providers: [] },
+  QA: { instructions: 'Write or extend automated tests for the acceptance criteria; report gaps you cannot cover.', readOnly: false, providers: [] },
+  'Security Reviewer': { instructions: 'Look for injection, secrets, unsafe deserialization, weakened permissions. Report findings; do not refactor.', readOnly: true, providers: [] },
+  Integrator: { instructions: 'Make the merged parts work together; prefer the smallest fix that keeps every side\'s intent.', readOnly: false, providers: [] },
+};
+
+export function roleTemplate(all: RoleTemplates | undefined, role: string): RoleTemplate {
+  return all?.[role] ?? DEFAULT_ROLE_TEMPLATES[role] ?? { instructions: '', readOnly: false, providers: [] };
+}
+
+/** Validate a user-supplied templates object (unknown roles are dropped). */
+export function normalizeRoleTemplates(raw: unknown, knownProvider: (id: string) => boolean): RoleTemplates {
+  if (!raw || typeof raw !== 'object') throw new Error('roleTemplates must be an object');
+  const out: RoleTemplates = {};
+  for (const role of ROLES) {
+    const r = (raw as Record<string, Record<string, unknown>>)[role];
+    if (!r) continue;
+    const providers = Array.isArray(r.providers) ? r.providers.map(String).filter(Boolean) : [];
+    const bad = providers.find((p) => !knownProvider(p));
+    if (bad) throw new Error(`role "${role}": unknown provider ${bad}`);
+    out[role] = { instructions: String(r.instructions ?? '').slice(0, 4000), readOnly: r.readOnly === true, providers };
+  }
+  return out;
+}
+
+export function buildPrompt(task: Task, project: Project, attempt: number, tpl?: RoleTemplate): string {
   const list = (xs: string[], empty: string) => (xs.length ? xs.map((x) => `- ${x}`).join('\n') : empty);
   return `# Task contract — HidForge task #${task.id}
 Attempt: ${attempt} of ${task.maxAttempts}
 Role: ${task.assignedRole}
-
+${tpl?.instructions ? `
+## Role guidance
+${tpl.instructions}
+` : ''}
 ## Project goal
 ${project.goal || '(not set)'}
 
@@ -29,7 +65,7 @@ ${list(task.allowedPaths, '- (any file in this repository)')}
 - run git push, deploy, install global tools, change credentials or system settings;
 - delete unrelated files or rewrite git history;
 - commit secrets.
-${task.policy === 'read-only' ? '- modify any file at all: this is a READ-ONLY task. Report findings only.\n' : ''}
+${task.policy === 'read-only' || tpl?.readOnly ? '- modify any file at all: this is a READ-ONLY task. Report findings only.\n' : ''}
 ## Validation (run by the orchestrator after you finish, you do not need to run them)
 ${list(task.verifyCommands, '- (no commands configured)')}
 ${task.feedback ? `\n## Feedback from the previous attempt — fix this\n${task.feedback}\n` : ''}

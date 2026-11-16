@@ -9,6 +9,7 @@ import { BadRequest, type HfEvent } from './store.ts';
 import { git } from './workspace.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
 import { normalizeReviewPolicy } from './reviewer.ts';
+import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contract.ts';
 import { projectCosts } from './costs.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
@@ -27,7 +28,8 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       if (!a) throw new BadRequest(`unknown agent ${m[1]}`);
       return a.listModels ? a.listModels() : [];
     }],
-    ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}) })],
+    ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}),
+      roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() } })],
     ['PUT', /^\/api\/settings$/, (_m, b) => {
       if (b.maxConcurrentAgents !== undefined) s.setSetting('maxConcurrentAgents', Math.max(1, Math.min(16, Number(b.maxConcurrentAgents) || 1)));
       if (b.routingPolicy !== undefined) {
@@ -39,7 +41,11 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
         if (!t || typeof t !== 'object') throw new BadRequest('agentTrust must be an object');
         s.setSetting('agentTrust', Object.fromEntries(Object.entries(t).filter(([k]) => orch.registry.get(k)).map(([k, v]) => [k, v === true])));
       }
-      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}) };
+      if (b.roleTemplates !== undefined) {
+        try { s.setSetting('roleTemplates', normalizeRoleTemplates(b.roleTemplates, (p) => Boolean(orch.registry.get(p)))); }
+        catch (e) { throw new BadRequest((e as Error).message); }
+      }
+      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}), roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() } };
     }],
     ['GET', /^\/api\/projects$/, () => s.listProjects()],
     ['POST', /^\/api\/projects$/, (_m, b) => orch.addProject(str(b.repoPath, 'repoPath'), String(b.goal ?? ''))],
