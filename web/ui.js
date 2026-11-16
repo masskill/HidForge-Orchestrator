@@ -42,6 +42,8 @@ const ICONS = {
   retry: 'M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4',
   activity: 'M3 12h4l3-8 4 16 3-8h4',
   report: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+  costs: 'M3 7h18v13H3zM3 7V5a2 2 0 0 1 2-2h13M16 12h5v5h-5a2.5 2.5 0 0 1 0-5z',
+  system: 'M4 5h16v6H4zM4 14h16v6H4zM7 8h.01M7 17h.01M11 8h6M11 17h6',
   terminal: 'M4 5h16v14H4zM8 10l3 2-3 2M13 15h4',
 };
 export function icon(name, cls = '') {
@@ -119,6 +121,10 @@ export function PanelCard(o = {}, ...kids) {
 /** StatCard({ label, value, hint, tone: accent|info|warning|danger|success }) */
 export const StatCard = ({ label, value, hint, tone }) => h('div', { class: cx('stat', tone && `t-${tone}`) },
   h('span', { class: 'label' }, label), h('span', { class: 'value' }, value), hint ? h('span', { class: 'hint' }, hint) : null);
+/** StatLink — semantic, keyboard-accessible link wrapping a stat card. */
+export const StatLink = ({ href, label, value, hint, tone }) => h('a',
+  { class: 'stat-link', href, 'aria-label': `${label}: ${value}. Переглянути деталі` },
+  StatCard({ label, value, hint, tone }));
 /** InfoList([[label, value], ...]) — InfoRow pairs rendered as a <dl>. */
 export const InfoList = (rows) => h('dl', { class: 'info' }, ...rows.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v ?? '—')]));
 /** ItemCard({ icon, title, subtitle, status, off, body, footer }) — entity card (agent, device, item). */

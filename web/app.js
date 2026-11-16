@@ -1,7 +1,7 @@
 // HidForge UI — pages composed from shared components in ui.js. Hash routing, no build step.
 import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
-  PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
+  PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
   Kanban, DagGraph, statusTone,
 } from './ui.js';
@@ -12,7 +12,7 @@ const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { retur
 const state = {
   projects: [], agents: null, settings: null, projectId: null, project: null, tasks: [], plans: [], activity: [],
   page: 'overview', taskId: null, editing: null, filter: ls.get('hf-filter') || 'all', view: ls.get('hf-view') || 'table', query: '', showCanceled: false,
-  detailTab: 'log', es: null, live: false, costs: null, models: {},
+  detailTab: 'log', reportsTab: 'report', reportsData: null, diag: null, es: null, live: false, costs: null, models: {},
 };
 const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'];
 const PAGES = [
@@ -20,6 +20,9 @@ const PAGES = [
   { id: 'tasks', label: 'Задачі', icon: 'tasks' },
   { id: 'planner', label: 'AI-планер', icon: 'planner' },
   { id: 'agents', label: 'Агенти', icon: 'agents' },
+  { id: 'costs', label: 'Витрати', icon: 'costs' },
+  { id: 'reports', label: 'Звіти й рішення', icon: 'report' },
+  { id: 'system', label: 'Система', icon: 'system' },
   { id: 'settings', label: 'Налаштування', icon: 'settings' },
 ];
 const ACTIVE = ['queued', 'running', 'ready'];
@@ -149,9 +152,10 @@ function route() {
 function render() {
   renderShell();
   const pg = $('#page');
-  const needsProject = ['overview', 'tasks', 'planner'].includes(state.page);
+  const needsProject = ['overview', 'tasks', 'planner', 'costs', 'reports'].includes(state.page);
   if (needsProject && !state.project) { pg.replaceChildren(noProject()); return; }
-  ({ overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage, settings: settingsPage })[state.page]();
+  ({ overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage, costs: costsPage,
+    reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
 }
 const noProject = () => PanelCard({}, EmptyState({ icon: 'folder', title: 'Проєкт не відкрито',
   text: 'Відкрийте локальний Git-репозиторій або створіть демо-проєкт, щоб планувати й запускати задачі агентів.',
@@ -164,25 +168,9 @@ const runPlanButton = () => {
 const newTaskButton = () => SecondaryButton({ icon: 'plus', onClick: () => { state.editing = 'new'; go('#/tasks'); render(); } }, 'Задача');
 
 // ---------------------------------------------------------------- page: overview
-/** Project report and decision log (ADR) as markdown: view, copy, download. */
+/** Open the full report and ADR workspace from the overview. */
 function reportButton() {
-  return SecondaryButton({ icon: 'report', onClick: act(async () => {
-    const pid = state.project.id;
-    const [rep, adr] = await Promise.all([api('GET', `/api/projects/${pid}/report`), api('GET', `/api/projects/${pid}/adr`)]);
-    const docs = { report: { label: 'Звіт', md: rep.markdown, file: `hidforge-report-${pid}.md` }, adr: { label: `Рішення (ADR · ${adr.decisions.length})`, md: adr.markdown, file: `hidforge-adr-${pid}.md` } };
-    let cur = 'report';
-    const pre = h('pre', { class: 'diff', style: 'white-space:pre-wrap;max-height:60vh' }, docs.report.md);
-    const seg = h('div', {});
-    const show = () => { pre.textContent = docs[cur].md; seg.replaceChildren(Segmented(Object.entries(docs).map(([id, d]) => ({ id, label: d.label })), cur, (id) => { cur = id; show(); })); };
-    show();
-    openModal({ title: 'Звіт по проєкту', body: h('div', { class: 'stack' }, seg, pre), actions: (close) => [
-      SecondaryButton({ onClick: async () => { try { await navigator.clipboard.writeText(docs[cur].md); toast('Скопійовано', 'success'); } catch { toast('Не вдалося скопіювати', 'danger'); } } }, 'Копіювати'),
-      PrimaryButton({ icon: 'check', onClick: () => {
-        const a = h('a', { href: URL.createObjectURL(new Blob([docs[cur].md], { type: 'text/markdown;charset=utf-8' })), download: docs[cur].file });
-        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); close();
-      } }, 'Завантажити .md'),
-    ] });
-  }) }, 'Звіт і рішення');
+  return SecondaryButton({ icon: 'report', onClick: () => go('#/reports') }, 'Звіт і рішення');
 }
 
 function overviewPage() {
@@ -201,7 +189,7 @@ function overviewPage() {
       StatCard({ label: 'Потребують уваги', value: count(ATTENTION), tone: 'warning', hint: 'рев\'ю та запитання' }),
       StatCard({ label: 'Злито', value: count(['merged']), tone: 'success' }),
       StatCard({ label: 'Проблеми', value: count(PROBLEM), tone: count(PROBLEM) ? 'danger' : undefined, hint: 'помилка / заблоковано' }),
-      StatCard({ label: 'Витрати', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd === 0 ? 'danger' : undefined,
+      StatLink({ href: '#/costs', label: 'Витрати', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd <= 0 ? 'danger' : undefined,
         hint: state.costs?.budgetUsd != null ? `бюджет ${usd(state.costs.budgetUsd)}, лишилось ${usd(state.costs.remainingUsd)}` : 'бюджет не задано' })),
     h('div', { class: 'grid cols-2' },
       PanelCard({ title: 'Ціль проєкту', subtitle: 'З неї AI-планер будує план задач' },
@@ -218,7 +206,6 @@ function overviewPage() {
       PanelCard({ title: 'Агенти', subtitle: 'Встановлені CLI та їхній стан', actions: GhostButton({ size: 'sm', onClick: () => go('#/agents') }, 'Детальніше') },
         state.agents ? h('div', { class: 'stack' }, ...state.agents.map((a) => { const [l, tone] = agentState(a); return h('div', { class: 'row between' }, h('span', {}, a.name, a.version ? h('span', { class: 'muted' }, ` ${a.version}`) : null), Badge(l, tone)); }))
           : h('p', { class: 'muted' }, 'Перевірка агентів…'))),
-    costsPanel(),
   );
 }
 
@@ -233,6 +220,110 @@ function costsPanel() {
       { label: 'Токени вводу', render: (x) => h('span', { class: 'mono' }, x.inputTokens.toLocaleString('uk-UA')) },
       { label: 'Токени виводу', render: (x) => h('span', { class: 'mono' }, x.outputTokens.toLocaleString('uk-UA')) },
     ], rows: c.byProvider }));
+}
+
+// ---------------------------------------------------------------- page: costs
+function costsPage() {
+  const p = state.project;
+  const c = state.costs;
+  const providers = c?.byProvider || [];
+  const sessions = providers.reduce((sum, x) => sum + (x.sessions || 0), 0);
+  const budget = c?.budgetUsd ?? p.budgetUsd ?? null;
+  const remaining = c?.remainingUsd ?? null;
+  mount(
+    PageHeader({ title: 'Витрати', subtitle: 'Витрати, токени, сесії агентів і бюджет проєкту', meta: projectMeta(p),
+      actions: SecondaryButton({ icon: 'refresh', onClick: act(async () => { await reloadProject(); render(); }) }, 'Оновити') }),
+    h('div', { class: 'grid stats' },
+      StatCard({ label: 'Витрачено', value: c ? usd(c.totalUsd) : '—' }),
+      StatCard({ label: 'Бюджет', value: budget == null ? 'не задано' : usd(budget) }),
+      StatCard({ label: 'Лишилось', value: budget == null ? '—' : remaining == null ? '—' : usd(remaining),
+        tone: budget != null && remaining != null && remaining <= 0 ? 'danger' : undefined }),
+      StatCard({ label: 'Сесій усього', value: c ? sessions : '—' })),
+    PanelCard({ title: 'Розподіл за видом', subtitle: 'Звітовані витрати у USD' },
+      c ? InfoList([
+        ['Задачі', usd(c.byKind?.task)],
+        ['AI-планер', usd(c.byKind?.planner)],
+        ['AI-рецензії', usd(c.byKind?.review)],
+      ]) : h('p', { class: 'muted' }, 'Не вдалося завантажити розподіл витрат.')),
+    h('p', { class: 'text-2', style: 'margin:0' },
+      'Важливо: USD-витрати звітує лише Claude Code. Інші CLI повідомляють тільки про токени, тому фактичні витрати можуть бути вищими.'),
+    !c ? PanelCard({}, EmptyState({ icon: 'alert', title: 'Дані витрат недоступні',
+      text: 'Перевірте сервер і натисніть «Оновити».' }))
+      : sessions ? costsPanel() : PanelCard({}, EmptyState({ icon: 'costs', title: 'Сесій ще немає',
+        text: 'Після запуску задач, планера або рецензій тут з’явиться статистика агентів.' })),
+    budgetSettings(p),
+  );
+}
+
+// ---------------------------------------------------------------- page: reports
+/** Save Markdown as a file without interpreting it as HTML. */
+function downloadMarkdown(markdown, filename) {
+  const href = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
+  const a = h('a', { href, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+function reportsPage() {
+  const pid = state.project.id;
+  const content = h('div', { class: 'stack' });
+  let requestId = 0;
+  // Live events re-render the page: show the last loaded data at once (no "loading" flicker), then refresh it.
+  const show = (report, adr) => {
+      const decisions = adr.decisions || [];
+      const copy = act(async (text) => { await navigator.clipboard.writeText(text); toast('Скопійовано', 'success'); });
+      const reportTab = h('div', { class: 'stack' },
+        h('div', { class: 'row' },
+          SecondaryButton({ icon: 'check', onClick: () => copy(report.markdown) }, 'Копіювати'),
+          PrimaryButton({ icon: 'report', onClick: () => downloadMarkdown(report.markdown, `hidforge-report-${pid}.md`) }, 'Завантажити .md')),
+        h('pre', { class: 'diff', style: 'white-space:pre-wrap' }, report.markdown || 'Звіт порожній.'));
+      const adrTab = h('div', { class: 'stack' },
+        h('div', { class: 'row' },
+          PrimaryButton({ icon: 'report', onClick: () => downloadMarkdown(adr.markdown, `hidforge-adr-${pid}.md`) }, 'Завантажити ADR .md')),
+        decisions.length ? h('div', { class: 'stack' }, ...decisions.map((d) => PanelCard({
+          title: d.title || 'Рішення без назви',
+          subtitle: d.ts ? `Дата: ${d.ts.replace('T', ' ').slice(0, 19)}` : 'Дата не вказана',
+          actions: d.taskId != null ? h('a', { href: `#/tasks/${d.taskId}`, class: 'report-task-link' }, `Задача #${d.taskId}`) : null,
+        }, InfoList([
+          ['Контекст', h('div', { class: 'pre-wrap' }, d.context || '—')],
+          ['Рішення', h('div', { class: 'pre-wrap' }, d.decision || '—')],
+          ['Наслідки', h('div', { class: 'pre-wrap' }, d.consequences || '—')],
+        ])))) : PanelCard({}, EmptyState({ icon: 'report', title: 'Рішень поки немає',
+          text: 'Коли в проєкті з’являться ADR, вони відображатимуться тут.' })));
+      content.replaceChildren(PanelCard({ title: 'Документація проєкту', subtitle: 'Звіт і журнал архітектурних рішень' },
+        Tabs([
+          { id: 'report', label: 'Звіт', content: reportTab },
+          { id: 'adr', label: `Рішення (ADR · ${decisions.length})`, content: adrTab },
+        ], state.reportsTab, (id) => { state.reportsTab = id; })));
+  };
+  const load = act(async () => {
+    const current = ++requestId;
+    if (state.reportsData?.pid !== pid) content.replaceChildren(PanelCard({}, h('p', { class: 'muted', style: 'margin:0' }, 'Завантаження звіту й рішень…')));
+    try {
+      const [report, adr] = await Promise.all([
+        api('GET', `/api/projects/${pid}/report`),
+        api('GET', `/api/projects/${pid}/adr`),
+      ]);
+      state.reportsData = { pid, report, adr };
+      if (!content.isConnected || state.page !== 'reports' || state.projectId !== pid || current !== requestId) return;
+      show(report, adr);
+    } catch (e) {
+      if (content.isConnected && current === requestId) {
+        content.replaceChildren(PanelCard({}, EmptyState({ icon: 'alert', title: 'Не вдалося завантажити звіт', text: e.message })));
+      }
+      throw e;
+    }
+  });
+  mount(
+    PageHeader({ title: 'Звіти й рішення', subtitle: 'Зведений звіт і журнал архітектурних рішень (ADR)',
+      meta: projectMeta(state.project),
+      actions: SecondaryButton({ icon: 'refresh', onClick: load }, 'Оновити') }),
+    content,
+  );
+  if (state.reportsData?.pid === pid) show(state.reportsData.report, state.reportsData.adr);
+  load();
 }
 
 // ---------------------------------------------------------------- page: tasks
@@ -582,6 +673,39 @@ function agentsPage() {
           a.notes.length ? h('ul', { class: 'muted', style: 'margin:0;padding-left:18px;font-size:var(--fs-sm)' }, ...a.notes.map((n) => h('li', {}, n))) : null),
       });
     })) : PanelCard({}, EmptyState({ icon: 'refresh', title: 'Перевірка агентів…', text: 'Шукаємо CLI у PATH і перевіряємо авторизацію.' })),
+    agentsExtSettings(),
+    trustSettings(),
+  );
+}
+
+// ---------------------------------------------------------------- page: system
+/** Last diagnostic result is kept in memory for this browser session. */
+function diagnosticBadges(d) {
+  if (!d?.checks) return [];
+  const total = (level) => d.checks.filter((c) => c.level === level).length;
+  const ukPlural = (n, one, few, many) => (n % 100 >= 11 && n % 100 <= 14) ? many
+    : n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many;
+  const warnings = total('warn');
+  const errors = total('error');
+  return [Badge(`${total('ok')} OK`, 'success'),
+    Badge(`${warnings} ${ukPlural(warnings, 'попередження', 'попередження', 'попереджень')}`, 'warning'),
+    Badge(`${errors} ${ukPlural(errors, 'помилка', 'помилки', 'помилок')}`, 'danger')];
+}
+
+function diagnosticTable(d) {
+  return Table({ columns: [
+    { label: 'Перевірка', render: (c) => h('strong', {}, c.label) },
+    { label: 'Стан', render: (c) => Badge(CHECK_LABEL[c.level] || c.level, CHECK_TONE[c.level] || 'neutral') },
+    { label: 'Деталі', class: 'grow', render: (c) => h('span', { class: 'wrap' }, c.detail) },
+  ], rows: d.checks });
+}
+
+function systemPage() {
+  mount(
+    PageHeader({ title: 'Система', subtitle: 'Стан середовища, резервні копії, версія й обслуговування сервера',
+      meta: h('div', { id: 'systemDiagSummary', class: 'row' }, ...diagnosticBadges(state.diag)) }),
+    maintenanceSettings(),
+    aboutSettings(),
   );
 }
 
@@ -596,18 +720,16 @@ function settingsPage() {
   if (p) { cmds = Textarea(p.allowedCommands.join('\n'), { placeholder: 'Одна команда на рядок, напр. npm test' }); }
   mount(
     PageHeader({ title: 'Налаштування', subtitle: 'Виконання, вигляд і політики проєкту' }),
+    PanelCard({}, h('div', { class: 'row' },
+      h('span', { class: 'text-2' }, 'Витрати й бюджет → '), h('a', { href: '#/costs' }, 'Витрати'),
+      h('span', { class: 'text-2' }, '· Діагностика, копії, версія → '), h('a', { href: '#/system' }, 'Система'))),
     h('div', { class: 'grid cols-2' },
       PanelCard({ title: 'Виконання', subtitle: 'Глобально для всіх проєктів' },
         Field('Паралельних агентів', maxConc, 'Скільки задач можуть виконуватися одночасно'),
         Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
       PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
-    p ? budgetSettings(p) : null,
     p ? reviewSettings(p) : null,
-    trustSettings(),
     rolesSettings(),
-    agentsExtSettings(),
-    maintenanceSettings(),
-    aboutSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
       cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
@@ -653,7 +775,7 @@ const CHECK_LABEL = { ok: 'OK', info: 'інфо', warn: 'увага', error: 'п
 
 /** Diagnostics (doctor) and backups of the local state. */
 function maintenanceSettings() {
-  const diag = h('div', {});
+  const diag = h('div', {}, state.diag ? diagnosticTable(state.diag) : null);
   const backups = h('div', {});
   const kb = (b) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} КБ` : `${(b / 1048576).toFixed(1)} МБ`);
   const loadBackups = async () => {
@@ -670,12 +792,15 @@ function maintenanceSettings() {
   };
   const runDiag = act(async () => {
     diag.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, 'Перевіряю…'));
-    const d = await api('GET', '/api/diagnostics');
-    diag.replaceChildren(Table({ columns: [
-      { label: 'Перевірка', render: (c) => h('strong', {}, c.label) },
-      { label: 'Стан', render: (c) => Badge(CHECK_LABEL[c.level], CHECK_TONE[c.level]) },
-      { label: 'Деталі', class: 'grow', render: (c) => h('span', { class: 'wrap' }, c.detail) },
-    ], rows: d.checks }));
+    try {
+      const d = await api('GET', '/api/diagnostics');
+      state.diag = d;
+      diag.replaceChildren(diagnosticTable(d));
+      $('#systemDiagSummary')?.replaceChildren(...diagnosticBadges(d));
+    } catch (e) {
+      diag.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, `Помилка діагностики: ${e.message}`));
+      throw e;
+    }
   });
   loadBackups().catch((e) => backups.replaceChildren(h('p', { class: 'muted' }, e.message)));
   return PanelCard({ title: 'Діагностика й резервні копії', subtitle: 'Стан середовища, бази й агентів; копії локального стану (SQLite)' },

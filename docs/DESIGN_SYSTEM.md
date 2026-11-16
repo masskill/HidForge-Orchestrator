@@ -11,7 +11,7 @@
 | `web/styles/ui.css` | База, AppShell, усі компоненти, адаптивність |
 | `web/ui.js` | Компоненти як функції, що повертають DOM-вузли |
 | `web/index.html` | Каркас AppShell |
-| `web/app.js` | Роутер (`#/overview`, `#/tasks[/id]`, `#/planner`, `#/agents`, `#/settings`) і сторінки, зібрані з компонентів |
+| `web/app.js` | Роутер (`#/overview`, `#/tasks[/id]`, `#/planner`, `#/agents`, `#/costs`, `#/reports`, `#/system`, `#/settings`) і сторінки, зібрані з компонентів |
 | `web/theme.js` | Тема до першого рендеру (без «спалаху») |
 
 ## Токени (темна тема)
@@ -39,6 +39,7 @@
 | `SectionHeader({title, count, actions})` | заголовок секції |
 | `PanelCard({title, subtitle, actions, flush}, ...children)` | основна панель; `flush` — для таблиць |
 | `StatCard({label, value, hint, tone})` | великі числа на дашборді |
+| `StatLink({href, ...StatCard})` | StatCard як посилання на сторінку з деталями (напр. «Витрати» на огляді) |
 | `InfoList([[label, value]])` | пари InfoRow як `<dl>` |
 | `Badge(text, tone)`, `StatusBadge(status)`, `Chip`, `PermissionChip` | статуси; єдиний словник статусів задач — `STATUS_LABEL` |
 | `Button({variant})`, `PrimaryButton`, `SecondaryButton`, `GhostButton`, `DangerButton`, `IconButton({icon, label})` | мова кнопок: одна primary-дія на блок, secondary — обведена, danger — м'яка червона |

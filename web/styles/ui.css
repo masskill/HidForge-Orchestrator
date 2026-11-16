@@ -67,6 +67,12 @@ svg.icon { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: no
 .stat .value { font-size: var(--fs-stat); font-weight: 750; line-height: 1.1; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 .stat .hint { color: var(--text-muted); font-size: var(--fs-xs); }
 .stat.t-accent .value { color: var(--accent); } .stat.t-info .value { color: var(--info); } .stat.t-warning .value { color: var(--warning); } .stat.t-danger .value { color: var(--danger); } .stat.t-success .value { color: var(--success); }
+.stat-link { color: inherit; text-decoration: none; display: block; min-width: 0; border-radius: var(--r-lg); }
+.stat-link:hover .stat, .stat-link:focus-visible .stat { border-color: var(--accent); background: var(--bg-panel-alt); }
+.stat-link:focus-visible { box-shadow: var(--focus); }
+.pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-task-link { display: inline-flex; align-items: center; min-height: 30px; font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
+.report-task-link:hover { text-decoration: underline; }
 .item { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4) var(--s-5); display: grid; gap: var(--s-3); align-content: start; }
 .item:hover { border-color: var(--border-strong); }
 .item-head { display: flex; align-items: center; gap: var(--s-3); }
