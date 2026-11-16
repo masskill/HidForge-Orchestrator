@@ -41,6 +41,7 @@ const ICONS = {
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   retry: 'M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4',
   activity: 'M3 12h4l3-8 4 16 3-8h4',
+  report: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
   terminal: 'M4 5h16v14H4zM8 10l3 2-3 2M13 15h4',
 };
 export function icon(name, cls = '') {

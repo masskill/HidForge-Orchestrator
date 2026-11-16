@@ -11,6 +11,7 @@ import { DEFAULT_ROUTING } from './adapters/index.ts';
 import { normalizeReviewPolicy } from './reviewer.ts';
 import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contract.ts';
 import { projectCosts } from './costs.ts';
+import { projectReport, adrMarkdown, decisions } from './report.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
@@ -58,6 +59,8 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       budgetUsd: b.budgetUsd === undefined ? undefined : budget(b.budgetUsd),
     })],
     ['GET', /^\/api\/projects\/(\d+)\/costs$/, (m) => projectCosts(s, id(m))],
+    ['GET', /^\/api\/projects\/(\d+)\/report$/, (m) => ({ markdown: projectReport(s, id(m)) })],
+    ['GET', /^\/api\/projects\/(\d+)\/adr$/, (m) => ({ markdown: adrMarkdown(s, id(m)), decisions: decisions(s, id(m)) })],
     ['POST', /^\/api\/projects\/(\d+)\/tasks$/, (m, b) => orch.createTask(id(m), { ...b, title: str(b.title, 'title') })],
     ['POST', /^\/api\/projects\/(\d+)\/submit-all$/, (m) => orch.submitAll(id(m))],
     ['GET', /^\/api\/tasks\/(\d+)$/, (m) => ({ task: s.getTask(id(m)), runs: s.runsForTask(id(m)) })],

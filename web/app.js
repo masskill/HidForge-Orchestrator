@@ -164,6 +164,27 @@ const runPlanButton = () => {
 const newTaskButton = () => SecondaryButton({ icon: 'plus', onClick: () => { state.editing = 'new'; go('#/tasks'); render(); } }, 'Задача');
 
 // ---------------------------------------------------------------- page: overview
+/** Project report and decision log (ADR) as markdown: view, copy, download. */
+function reportButton() {
+  return SecondaryButton({ icon: 'report', onClick: act(async () => {
+    const pid = state.project.id;
+    const [rep, adr] = await Promise.all([api('GET', `/api/projects/${pid}/report`), api('GET', `/api/projects/${pid}/adr`)]);
+    const docs = { report: { label: 'Звіт', md: rep.markdown, file: `hidforge-report-${pid}.md` }, adr: { label: `Рішення (ADR · ${adr.decisions.length})`, md: adr.markdown, file: `hidforge-adr-${pid}.md` } };
+    let cur = 'report';
+    const pre = h('pre', { class: 'diff', style: 'white-space:pre-wrap;max-height:60vh' }, docs.report.md);
+    const seg = h('div', {});
+    const show = () => { pre.textContent = docs[cur].md; seg.replaceChildren(Segmented(Object.entries(docs).map(([id, d]) => ({ id, label: d.label })), cur, (id) => { cur = id; show(); })); };
+    show();
+    openModal({ title: 'Звіт по проєкту', body: h('div', { class: 'stack' }, seg, pre), actions: (close) => [
+      SecondaryButton({ onClick: async () => { try { await navigator.clipboard.writeText(docs[cur].md); toast('Скопійовано', 'success'); } catch { toast('Не вдалося скопіювати', 'danger'); } } }, 'Копіювати'),
+      PrimaryButton({ icon: 'check', onClick: () => {
+        const a = h('a', { href: URL.createObjectURL(new Blob([docs[cur].md], { type: 'text/markdown;charset=utf-8' })), download: docs[cur].file });
+        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); close();
+      } }, 'Завантажити .md'),
+    ] });
+  }) }, 'Звіт і рішення');
+}
+
 function overviewPage() {
   const p = state.project;
   const goal = Textarea(p.goal, { class: 'prose', id: 'goal', placeholder: 'Загальна ціль проєкту…', 'aria-label': 'Ціль проєкту' });
@@ -173,7 +194,7 @@ function overviewPage() {
   const attention = state.tasks.filter((t) => [...ATTENTION, ...PROBLEM].includes(t.status));
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   mount(
-    PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [newTaskButton(), runPlanButton()] }),
+    PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [reportButton(), newTaskButton(), runPlanButton()] }),
     h('div', { class: 'grid stats' },
       StatCard({ label: 'Усього задач', value: state.tasks.length, hint: `${count(['draft'])} чернеток` }),
       StatCard({ label: 'Виконується', value: count(ACTIVE), tone: 'info', hint: `з них у роботі: ${count(['running'])}` }),
@@ -257,7 +278,7 @@ function tasksPage() {
   });
   const open = (t) => go(`#/tasks/${t.id}`);
   const board = () => Kanban({ empty: '—', columns: BOARD.map((c) => ({ id: c.id, title: c.title, items: visible.filter((t) => c.statuses.includes(t.status)) })),
-    card: (t) => h('button', { type: 'button', class: t.id === state.taskId ? 'kcard sel' : 'kcard', onClick: () => open(t) },
+    card: (t) => h('button', { type: 'button', class: t.id === state.taskId ? 'kcard sel' : 'kcard', onclick: () => open(t) },
       h('span', { class: 'wrap' }, h('span', { class: 'id' }, `#${t.id} `), t.title),
       h('span', { class: 'kmeta' }, h('span', {}, `${t.assignedRole} · ${t.provider}`), StatusBadge(t.status))) });
   const graph = () => (visible.length ? DagGraph({ selected: state.taskId, onNode: (n) => open(n.task),

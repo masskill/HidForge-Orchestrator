@@ -86,6 +86,7 @@ src/            ядро (TypeScript, запускається Node 24 напр�
   orchestrator.ts  scheduler, запуски, gate-и, merge, відновлення
   planner.ts       LLM-планер: ціль → валідований DAG → чернетки задач
   reviewer.ts      AI-рецензент QA + Security: diff → вердикт → repair / блок merge
+  report.ts        звіт по проєкту й журнал рішень ADR (з історії, без нового сховища)
   oneshot.ts       спільний одноразовий read-only запуск агента (планер, рецензент)
   store.ts, db.ts  SQLite: єдине джерело істини, міграції, state machine
   workspace.ts     git worktree, diff, allowedPaths, merge

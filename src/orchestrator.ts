@@ -236,12 +236,30 @@ export class Orchestrator {
 
   /** Integration check on the base branch after a merge (approved commands only). */
   private async postMergeChecks(t: Task, p: Project): Promise<void> {
+    const failed: { cmd: string; out: string }[] = [];
     for (const cmd of t.verifyCommands) {
       if (commandDecision(cmd, p.allowedCommands).decision !== 'allow') continue;
       const r = await this.runVerify(cmd, p.repoPath);
       this.store.addEvidence(t.id, { kind: 'integration-check', ok: r.code === 0, summary: `[${p.baseBranch}] ${cmd} -> exit ${r.code}`, detail: r.out });
-      if (r.code !== 0) this.store.event({ projectId: p.id, taskId: t.id, type: 'integration.failed', data: { cmd } });
+      if (r.code !== 0) { failed.push({ cmd, out: r.out }); this.store.event({ projectId: p.id, taskId: t.id, type: 'integration.failed', data: { cmd } }); }
     }
+    if (failed.length) this.createIntegrator(t, p, failed);
+  }
+
+  /** A failed post-merge check becomes a separate Integrator task — a draft, so nothing runs without the user. */
+  private createIntegrator(t: Task, p: Project, failed: { cmd: string; out: string }[]): Task {
+    const it = this.createTask(p.id, {
+      title: `Integrator: fix ${p.baseBranch} after #${t.id} ${t.title}`.slice(0, 200),
+      assignedRole: 'Integrator', provider: t.provider, model: t.model, maxAttempts: 2, allowedPaths: [],
+      verifyCommands: failed.map((f) => f.cmd),
+      description: `Task #${t.id} "${t.title}" was merged into ${p.baseBranch}, and these integration checks now fail on ${p.baseBranch}:\n\n`
+        + failed.map((f) => `$ ${f.cmd}\n${maskSecrets(f.out).slice(-3000)}`).join('\n\n')
+        + `\n\nMake the smallest change that makes them pass again without undoing the intent of task #${t.id}.`,
+      acceptanceCriteria: failed.map((f) => `\`${f.cmd}\` exits 0`).join('\n'),
+    });
+    this.store.patchTask(t.id, { artifacts: { ...this.store.getTask(t.id).artifacts, integratorTaskId: it.id } });
+    this.store.addEvidence(t.id, { kind: 'integrator', ok: false, summary: `Integration check failed on ${p.baseBranch}; Integrator draft #${it.id} created` });
+    return it;
   }
 
   // ------------------------------------------------------------------ scheduler
