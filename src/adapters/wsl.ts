@@ -1,7 +1,7 @@
 // Optional WSL2 backend: run a CLI agent inside a WSL distribution on the same Windows worktree.
 // `wsl.exe -d <distro> --cd <linux path> --exec <bin> ...` — no shell inside WSL, prompt still via stdin.
 // HidForge itself (git, gates, merge) keeps running on Windows.
-import { run } from '../proc.ts';
+import { run, bareCommand } from '../proc.ts';
 import type { AgentAdapter, ModelInfo, StartContext, Invocation } from './types.ts';
 
 /** E:\a b\c -> /mnt/e/a b/c ; \\wsl$\Distro\home\u -> /home/u (also \\wsl.localhost\...). */
@@ -36,7 +36,7 @@ export class WslAdapter implements AgentAdapter {
     this.id = `${inner.id}-wsl`;
     this.name = `${inner.name} (WSL: ${distro})`;
   }
-  private get bin() { return this.inner.spec?.bin ?? this.inner.id; }
+  private get bin() { return bareCommand(this.inner.spec?.bin ?? this.inner.id); }
   async detect() {
     const r = await run('wsl.exe', ['-d', this.distro, '--exec', this.bin, '--version'], { timeoutMs: 30_000 });
     const out = clean(r.stdout || r.stderr).split(/\r?\n/)[0] ?? null;
@@ -50,7 +50,7 @@ export class WslAdapter implements AgentAdapter {
   buildInvocation(ctx: StartContext): Invocation {
     const dir = toWslPath(ctx.workspace);
     const inv = this.inner.buildInvocation({ ...ctx, workspace: dir }); // the CLI runs in Linux (codex --cd)
-    return { command: 'wsl.exe', args: ['-d', this.distro, '--cd', dir, '--exec', inv.command, ...inv.args], stdin: inv.stdin };
+    return { command: 'wsl.exe', args: ['-d', this.distro, '--cd', dir, '--exec', bareCommand(inv.command), ...inv.args], stdin: inv.stdin };
   }
   parseLine(line: string) { return this.inner.parseLine(line); }
   async listModels(): Promise<ModelInfo[]> { return []; }

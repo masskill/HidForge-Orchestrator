@@ -109,3 +109,20 @@ test('WSL agents are added to the registry from settings', () => {
     assert.match(o2.registry.get('claude-wsl')!.name, /WSL: Ubuntu/);
   } finally { o2.store.db.close(); }
 });
+
+test('codex: newest desktop-app codex.exe wins over PATH; WSL/ssh get the bare command name', async () => {
+  const { codexBin } = await import('../src/adapters/cli.ts');
+  const { bareCommand } = await import('../src/proc.ts');
+  const { utimesSync } = await import('node:fs');
+  const dir = path.join(tmpRoot(), 'bin');
+  assert.equal(codexBin(path.join(dir, 'missing')), 'codex', 'no desktop app -> codex from PATH');
+  for (const [b, t] of [['old', 1_000], ['new', 2_000], ['empty', 3_000]] as const) {
+    mkdirSync(path.join(dir, b), { recursive: true });
+    if (b !== 'empty') { writeFileSync(path.join(dir, b, 'codex.exe'), ''); utimesSync(path.join(dir, b, 'codex.exe'), t, t); }
+  }
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) assert.equal(codexBin(dir), path.join(dir, 'new', 'codex.exe'));
+  assert.equal(bareCommand('C:\\Users\\u\\AppData\\Local\\OpenAI\\Codex\\bin\\abc\\codex.exe'), 'codex');
+  assert.equal(bareCommand('claude'), 'claude');
+  const w = new WslAdapter({ ...pluginAdapter(validatePlugin(base)), buildInvocation: () => ({ command: 'C:\\x\\codex.exe', args: ['exec'], stdin: 'p' }) } as never, 'Ubuntu');
+  assert.deepEqual(w.buildInvocation({ prompt: 'p', workspace: 'E:\\w', model: null, policy: 'workspace-write' }).args.slice(-2), ['codex', 'exec']);
+});

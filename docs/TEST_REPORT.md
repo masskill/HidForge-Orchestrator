@@ -1,5 +1,13 @@
 # Звіт про перевірку
 
+## Codex через десктопний застосунок (2026-11-16)
+
+| Перевірка | Результат |
+|---|---|
+| Вибір бінарника | ✅ `codexBin()`: найновіший `%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe` (тут 0.169.0-alpha), інакше `codex` з PATH (0.153.4); для WSL/ssh — гола назва `codex` (`bareCommand`). Тест у `test/plugins.test.ts` |
+| Реальна задача на запис (`node scripts/smoke-real.ts codex`, без явної моделі) | 🟡 запуск `succeeded`, модель із `config.toml` прийнята (раніше 400), usage 152 967 / 414 токенів; файл не створено: `Failed to write file … sandbox initialization error` → gate «no changes» → `blocked` (нічого не злито) |
+| Причина (без витрати квоти: `codex sandbox -- …`) | `helper_sandbox_lock_failed: lock sandbox bin dir ~\.codex\.sandbox-bin failed: SetNamedSecurityInfoW sandbox dir failed: 5`. Власник теки — `BUILTIN\Администраторы`, у користувача лише `(M)`, без права змінювати дозволи. Виправлення — дія користувача |
+
 ## Бекенд для сторінок «Запуски» і «Ролі», облік токенів Cursor (2026-11-16)
 
 | Перевірка | Результат |

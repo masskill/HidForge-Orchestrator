@@ -19,7 +19,7 @@
 
 ## Етап 2 — реальні CLI
 - ✅ Claude Code: реальний прогін задачі й планера
-- 🟡 Codex CLI: з явною моделлю зі списку (`codex debug models`) реальні read-only сесії працюють (рецензент ✅); запис файлів блокує Windows-sandbox Codex на цьому комп'ютері (`Failed to write file`), обходити sandbox не можна
+- 🟡 Codex CLI: HidForge бере найновіший `codex.exe` десктопного застосунку Codex (0.169, той самий вхід) — модель з вашого `config.toml` працює без явного вибору, read-only сесії ✅; запис файлів блокує пісочниця Codex: її тека `~/.codex/.sandbox-bin` належить «Администраторы», `SetNamedSecurityInfoW` → 5 (доступ заборонено). Права безпеки змінюєте ви; обходити sandbox не можна
 - ✅ Antigravity `agy`: реальний прогін задачі й планера без bypass
 - ✅ Cursor Agent CLI: запуск без PowerShell, список моделей; з вашим явним дозволом довіри до worktree HidForge реальний headless-прогін задачі пройшов (файл, gate, usage), без `--force`/`--yolo`
 - ✅ Capability-based degradation: недоступний CLI не зупиняє проєкт

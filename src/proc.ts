@@ -65,6 +65,9 @@ function versionedNodeLauncher(dir: string): Resolved | null {
   return ver ? { file: path.join(root, ver, 'node.exe'), prefixArgs: [path.join(root, ver, 'index.js')] } : null;
 }
 
+/** Command name for another OS (WSL, ssh host): a local absolute Windows path becomes its bare name (…\codex.exe -> codex). */
+export const bareCommand = (cmd: string) => path.basename(cmd.replace(/\\/g, '/')).replace(/\.exe$/i, '');
+
 /** Split a command line into argv (supports "double" and 'single' quotes). Never uses a shell. */
 export function parseArgv(line: string): string[] {
   const out: string[] = [];

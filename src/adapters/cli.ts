@@ -1,6 +1,8 @@
 // Declarative adapters for real CLIs. Flags were checked against local `--help` output
 // (claude 2.1.325, codex-cli 0.153.4, agy 1.5.9, cursor-agent 2026.11.05) and recorded stream fixtures in open-mercato/cezar (MIT).
 // No permission-bypass flag is ever emitted.
+import { readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { run, resolveCommand } from '../proc.ts';
 import type { AgentAdapter, AgentEvent, Capabilities, Invocation, ModelInfo, StartContext } from './types.ts';
 
@@ -79,19 +81,36 @@ export const CLAUDE: CliSpec = {
   models: async () => [{ id: 'haiku', label: 'Haiku (alias)' }, { id: 'sonnet', label: 'Sonnet (alias)' }, { id: 'opus', label: 'Opus (alias)' }],
 };
 
+/**
+ * The Codex desktop app ships a newer CLI (%LOCALAPPDATA%/OpenAI/Codex/bin/<build>/codex.exe) than the standalone one
+ * on PATH (0.153 there rejects gpt-6.x on a ChatGPT account). Use the newest app build if present, else `codex` from PATH.
+ * Same login (~/.codex), nothing is copied.
+ */
+export function codexBin(appBinDir = path.join(process.env.LOCALAPPDATA ?? '', 'OpenAI', 'Codex', 'bin')): string {
+  if (process.platform !== 'win32' || !process.env.LOCALAPPDATA) return 'codex';
+  let best: { file: string; t: number } | null = null;
+  try {
+    for (const d of readdirSync(appBinDir)) {
+      const file = path.join(appBinDir, d, 'codex.exe');
+      try { const t = statSync(file).mtimeMs; if (!best || t > best.t) best = { file, t }; } catch { /* no codex.exe in this build dir */ }
+    }
+  } catch { /* desktop app not installed */ }
+  return best?.file ?? 'codex';
+}
+
 export const CODEX: CliSpec = {
-  id: 'codex', name: 'OpenAI Codex CLI', bin: 'codex',
+  id: 'codex', name: 'OpenAI Codex CLI', get bin() { return codexBin(); },
   async auth() {
-    const r = await run('codex', ['login', 'status'], { timeoutMs: 30_000 });
+    const r = await run(CODEX.bin, ['login', 'status'], { timeoutMs: 30_000 });
     return r.code === 0 ? { auth: 'ok', reason: null } : { auth: 'missing', reason: 'run `codex login`' };
   },
   caps: { headless: 'supported', streamEvents: 'supported', cancel: 'supported', questions: 'unsupported', usage: 'supported', modelSelect: 'supported', readOnlyMode: 'supported' },
   notes: [
-    'Runs `codex exec --json --sandbox workspace-write|read-only`; Codex\'s own sandbox stays on.',
+    'Runs `codex exec --json --sandbox workspace-write|read-only`; Codex\'s own sandbox stays on. Uses the newest codex.exe of the Codex desktop app if it is installed (same login in ~/.codex), else `codex` from PATH.',
     'Without a model set on the task, Codex uses `model` from ~/.codex/config.toml. If your account rejects it, pick a model from the list (`codex debug models`); HidForge never edits your Codex config.',
   ],
   models: async () => {
-    const r = await run('codex', ['debug', 'models'], { timeoutMs: 60_000 });
+    const r = await run(CODEX.bin, ['debug', 'models'], { timeoutMs: 60_000 });
     try {
       const j = JSON.parse(r.stdout) as { models?: O[] } | O[];
       const arr = (Array.isArray(j) ? j : j.models ?? []) as O[];

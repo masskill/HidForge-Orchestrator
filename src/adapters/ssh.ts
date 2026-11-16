@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveCommand, childEnv } from '../proc.ts';
+import { resolveCommand, childEnv, bareCommand } from '../proc.ts';
 import { git } from '../workspace.ts';
 import type { AgentAdapter, ModelInfo, StartContext, Invocation } from './types.ts';
 
@@ -123,7 +123,7 @@ export class SshAdapter implements AgentAdapter {
     this.id = `${inner.id}-ssh`;
     this.name = `${inner.name} (SSH: ${cfg.host})`;
   }
-  private get bin() { return this.inner.spec?.bin ?? this.inner.id; }
+  private get bin() { return bareCommand(this.inner.spec?.bin ?? this.inner.id); }
   private sshArgs(remoteCmd: string): string[] {
     return ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', ...(this.cfg.port ? ['-p', String(this.cfg.port)] : []), '--', this.cfg.host, remoteCmd];
   }
@@ -174,7 +174,7 @@ export class SshAdapter implements AgentAdapter {
   buildInvocation(ctx: StartContext): Invocation {
     const dir = this.remoteDir(ctx.workspace);
     const inv = this.inner.buildInvocation({ ...ctx, workspace: '.' }); // already cd'd into it (codex --cd)
-    const remote = `cd ${shq(dir)} && exec ${[inv.command, ...inv.args].map(shq).join(' ')}`;
+    const remote = `cd ${shq(dir)} && exec ${[bareCommand(inv.command), ...inv.args].map(shq).join(' ')}`;
     return { command: this.transport[0]!, args: [...this.transport.slice(1), ...this.sshArgs(remote)], stdin: inv.stdin };
   }
   parseLine(line: string) { return this.inner.parseLine(line); }
