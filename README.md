@@ -85,3 +85,6 @@ web/            UI (vanilla JS, світла/темна тема)
 test/           unit + e2e (реальні процеси, git, SQLite)
 scripts/        smoke-real.ts
 ```
+
+## Ліцензія
+[MIT](LICENSE) © 2026 masskill. Сторонні джерела й атрибуція — [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
