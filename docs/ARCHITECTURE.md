@@ -72,6 +72,11 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - Після рестарту активний планер позначається `failed` (його процес убивається) — сесії планування не відновлюються.
 - API: `POST/GET /api/projects/:id/plans`, `GET /api/plans/:id`, `POST /api/plans/:id/{apply,cancel,discard}`.
 
+## Запуск, встановлення, оновлення
+- `src/main.ts --open` відкриває UI у браузері за замовчуванням (`explorer.exe <url>` на Windows, без shell). Перед стартом оркестратора `main.ts` перевіряє `GET /api/version` на своєму порту: якщо там уже HidForge, другий процес лише відкриває браузер і завершується — два оркестратори на одних даних не запускаються.
+- `scripts/HidForge.vbs` — запуск без вікна (WSH `Run …, 0`), вивід у `%LOCALAPPDATA%\HidForge\hidforge.log`; `POST /api/shutdown` (з токеном) — коректна зупинка з UI.
+- `scripts/install.ps1` — ярлики користувача на `wscript.exe HidForge.vbs`; `scripts/update.ps1` — `git fetch` + `merge --ff-only`, `npm install` лише якщо є `node_modules` (для роботи залежності не потрібні).
+
 ## Integrator, звіти й ADR (`src/orchestrator.ts`, `src/report.ts`)
 - Після merge задачі її перевірки запускаються на базовій гілці. Якщо хоч одна падає, `createIntegrator` створює **чернетку** задачі ролі Integrator: опис містить вивід перевірки (секрети замасковано, останні 3000 символів), `verifyCommands` — ті самі команди, критерій — exit 0. Задача лише пропонується: запускає її користувач. Зв'язок — `artifacts.integratorTaskId` і evidence `integrator`.
 - `projectReport` — markdown-звіт: підсумок (% злитих), статуси, таблиця задач з AI-вердиктом і останнім доказом, «Потребує уваги», витрати за агентами, перелік рішень.

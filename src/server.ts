@@ -15,7 +15,16 @@ import { projectReport, adrMarkdown, decisions } from './report.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
-export interface ServerOptions { port: number; webDir: string; token?: string }
+export interface ServerOptions { port: number; webDir: string; token?: string; onShutdown?: () => void }
+
+export const APP_NAME = 'hidforge-orchestrator';
+/** Version from package.json plus the git commit of the install (if it is a git checkout). */
+export async function appVersion(appRoot: string): Promise<{ name: string; version: string; commit: string | null; node: string }> {
+  let version = '0.0.0';
+  try { version = String(JSON.parse(await readFile(path.join(appRoot, 'package.json'), 'utf8')).version); } catch { /* not packaged */ }
+  const r = await git(appRoot, ['rev-parse', '--short', 'HEAD'], 5000).catch(() => null);
+  return { name: APP_NAME, version, commit: r && r.code === 0 ? r.stdout.trim() : null, node: process.versions.node };
+}
 
 export function createServer(orch: Orchestrator, o: ServerOptions) {
   const token = o.token ?? randomBytes(24).toString('hex');
@@ -23,6 +32,12 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
   const id = (m: RegExpMatchArray) => Number(m[1]);
   const routes: [string, RegExp, Handler][] = [
     ['GET', /^\/api\/health$/, () => ({ ok: true })],
+    ['GET', /^\/api\/version$/, () => appVersion(path.resolve(o.webDir, '..'))],
+    ['POST', /^\/api\/shutdown$/, () => {
+      if (!o.onShutdown) throw new BadRequest('shutdown is not available in this mode');
+      setTimeout(o.onShutdown, 100);
+      return { ok: true };
+    }],
     ['GET', /^\/api\/agents$/, (_m, _b, u) => orch.registry.status(u.searchParams.get('refresh') === '1')],
     ['GET', /^\/api\/agents\/([\w-]+)\/models$/, async (m) => {
       const a = orch.registry.get(m[1]!);

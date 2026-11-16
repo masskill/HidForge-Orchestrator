@@ -605,6 +605,7 @@ function settingsPage() {
     p ? reviewSettings(p) : null,
     trustSettings(),
     rolesSettings(),
+    aboutSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
       cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
@@ -624,6 +625,24 @@ function budgetSettings(p) {
       await reloadProject(); toast('Бюджет збережено', 'success'); render();
     }) }, 'Зберегти')));
 }
+/** Version, updates and stopping a server that was started without a terminal. */
+function aboutSettings() {
+  const info = h('div', {}, h('p', { class: 'muted', style: 'margin:0' }, 'Завантаження…'));
+  api('GET', '/api/version').then((v) => info.replaceChildren(InfoList([
+    ['Версія', h('span', { class: 'mono' }, `${v.version}${v.commit ? ` (${v.commit})` : ''}`)],
+    ['Node.js', h('span', { class: 'mono' }, v.node)],
+  ]))).catch((e) => info.replaceChildren(h('p', { class: 'muted', style: 'margin:0' }, e.message)));
+  const stop = act(async () => {
+    if (!await confirmModal('Зупинити сервер HidForge? Задачі, що виконуються, буде перервано й відновлено при наступному запуску.', { danger: true, ok: 'Зупинити' })) return;
+    await api('POST', '/api/shutdown');
+    mount(EmptyState({ icon: 'stop', title: 'Сервер зупинено', text: 'Запустіть HidForge знову ярликом «HidForge Orchestrator» або командою node src\\main.ts --open.' }));
+  });
+  return PanelCard({ title: 'Про програму', subtitle: 'Версія, оновлення, зупинка сервера' }, info,
+    h('p', { class: 'text-2', style: 'margin:0;font-size:var(--fs-sm)' }, 'Оновлення: ', h('span', { class: 'mono' }, 'scripts\\update.ps1 -Check'), ' показує нові коміти, ',
+      h('span', { class: 'mono' }, 'scripts\\update.ps1'), ' оновлює лише fast-forward (локальні зміни не перезаписуються). Після оновлення перезапустіть сервер.'),
+    h('div', {}, DangerButton({ icon: 'stop', onClick: stop }, 'Зупинити сервер')));
+}
+
 function rolesSettings() {
   const s = state.settings;
   if (!s?.roleTemplates) return null;

@@ -12,6 +12,22 @@
 
 Docker, tmux, WSL2 та платні API **не потрібні**.
 
+## Встановлення й запуск без термінала (Windows)
+
+Інсталятор лише перевіряє Node.js 24+ і Git (нічого не встановлює сам, права адміністратора не потрібні) і створює ярлик «HidForge Orchestrator» на робочому столі та в меню «Пуск»:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+Ярлик запускає сервер без вікна термінала (`scripts\HidForge.vbs`) і відкриває UI у браузері; повторний запуск лише відкриває вже запущений екземпляр. Журнал сервера: `%LOCALAPPDATA%\HidForge\hidforge.log`. Зупинка: «Налаштування → Про програму → Зупинити сервер». Видалити ярлики (дані залишаться): `scripts\install.ps1 -Uninstall`.
+
+Оновлення (лише fast-forward з origin; локальні зміни не перезаписуються):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1 -Check
+```
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1
+```
+
 ## Команди (PowerShell)
 
 ```powershell
