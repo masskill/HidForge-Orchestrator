@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, Conflict, type PlanDoc, type PlanRun, type PlanTask, type Project, type Task } from './store.ts';
 import { topoOrder } from './dag.ts';
-import { ROLES, commandDecision } from './contract.ts';
+import { ROLES, cleanModel, commandDecision } from './contract.ts';
 import type { AgentAdapter } from './adapters/types.ts';
 import { killTree, isAlive, maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
@@ -134,8 +134,9 @@ export class Planner {
     const maxTasks = Math.max(1, Math.min(30, Number(o.maxTasks ?? 12)));
     const { adapter, provider } = await resolveReadOnlyAgent(this.orch, o.provider ?? 'auto', 'planner');
 
-    const plan = store.createPlan({ projectId, provider, model: o.model ?? null, goal: p.goal });
-    store.event({ projectId, type: 'plan.started', data: { planId: plan.id, provider, model: o.model ?? null, mock: adapter.mock } });
+    const model = cleanModel(o.model);
+    const plan = store.createPlan({ projectId, provider, model, goal: p.goal });
+    store.event({ projectId, type: 'plan.started', data: { planId: plan.id, provider, model, mock: adapter.mock } });
     void this.orch.track(this.execute(plan, p, adapter, maxTasks, (o.timeoutSec ?? 900) * 1000));
     return plan;
   }

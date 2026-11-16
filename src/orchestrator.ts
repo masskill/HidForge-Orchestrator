@@ -13,7 +13,7 @@ import { loadPlugins, type PluginLoad } from './adapters/plugin.ts';
 import { WslAdapter, type WslConfig } from './adapters/wsl.ts';
 import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
-import { buildPrompt, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
+import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
 import { projectCosts } from './costs.ts';
@@ -144,6 +144,7 @@ export class Orchestrator {
     const out: Record<string, unknown> = {};
     for (const k of EDITABLE_FIELDS) if (input[k] !== undefined) out[k] = input[k];
     if (out.provider !== undefined && out.provider !== 'auto' && !this.registry.get(String(out.provider))) throw new BadRequest(`unknown provider ${out.provider}`);
+    if (out.model !== undefined) out.model = cleanModel(out.model);
     if (out.policy !== undefined && !['read-only', 'workspace-write'].includes(String(out.policy))) throw new BadRequest('policy must be read-only or workspace-write');
     for (const k of ['dependsOn', 'allowedPaths', 'verifyCommands'] as const) {
       if (out[k] !== undefined && !Array.isArray(out[k])) throw new BadRequest(`${k} must be an array`);

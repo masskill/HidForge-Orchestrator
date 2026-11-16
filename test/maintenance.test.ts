@@ -46,7 +46,8 @@ test('diagnostics: healthy setup has no errors; a missing project repo is an err
       assert.equal((await fetch(`${base}/api/backups`, { method: 'POST', headers: { 'x-hidforge-token': 't' } })).status, 200);
       const r = await (await fetch(`${base}/api/backups`)).json() as { backups: unknown[] };
       assert.equal(r.backups.length, 1);
-      const x = await (await fetch(`${base}/api/diagnostics`)).json() as { checks: { id: string; level: string }[] };
+      assert.equal((await fetch(`${base}/api/diagnostics`)).status, 403, 'diagnostics spawns processes: needs the token');
+      const x = await (await fetch(`${base}/api/diagnostics`, { headers: { 'x-hidforge-token': 't' } })).json() as { checks: { id: string; level: string }[] };
       assert.equal(x.checks.find((c) => c.id === 'backup')!.level, 'ok');
     } finally { await srv.close(); }
   } finally { await orch.stop(); }

@@ -13,5 +13,14 @@ If sh.Run("cmd /c where node", 0, True) <> 0 Then
 End If
 logDir = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\HidForge"
 If Not fso.FolderExists(logDir) Then fso.CreateFolder logDir
+' Keep the log bounded: rotate to hidforge.log.1 once it exceeds 5 MB (skipped if a running instance holds the file).
+On Error Resume Next
+If fso.FileExists(logDir & "\hidforge.log") Then
+  If fso.GetFile(logDir & "\hidforge.log").Size > 5242880 Then
+    If fso.FileExists(logDir & "\hidforge.log.1") Then fso.DeleteFile logDir & "\hidforge.log.1"
+    fso.MoveFile logDir & "\hidforge.log", logDir & "\hidforge.log.1"
+  End If
+End If
+On Error GoTo 0
 sh.CurrentDirectory = root
 sh.Run "cmd /c node src\main.ts --open >> """ & logDir & "\hidforge.log"" 2>&1", 0, False

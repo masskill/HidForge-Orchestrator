@@ -70,6 +70,13 @@ test('costs/budget/models HTTP API', async () => {
     const c = await (await call('GET', `/api/projects/${project.id}/costs`)).json() as { budgetUsd: number; totalUsd: number };
     assert.deepEqual([c.budgetUsd, c.totalUsd], [2.5, 0]);
     assert.deepEqual(await (await call('GET', '/api/agents/mock/models')).json(), []);
+    assert.equal((await fetch(base + '/api/agents/mock/models')).status, 403, 'model listing spawns a CLI: needs the token');
+    assert.equal((await fetch(base + '/api/agents?refresh=1')).status, 403);
+    assert.equal((await fetch(base + '/api/agents')).status, 200, 'cached status stays readable');
+    const bad = await call('POST', `/api/projects/${project.id}/tasks`, { title: 'x', model: '--dangerously-skip-permissions' });
+    assert.equal(bad.status, 400, 'a model that looks like a flag is rejected');
+    const ok = await (await call('POST', `/api/projects/${project.id}/tasks`, { title: 'y', model: 'gpt-5.1-codex[high]' })).json() as { model: string };
+    assert.equal(ok.model, 'gpt-5.1-codex[high]');
     assert.equal((await call('GET', '/api/agents/nope/models')).status, 400);
     const st = await (await call('PUT', '/api/settings', { agentTrust: { cursor: true, bogus: true } })).json() as { agentTrust: object };
     assert.deepEqual(st.agentTrust, { cursor: true });

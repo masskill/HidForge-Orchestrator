@@ -123,7 +123,9 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       const port = (server.address() as { port: number } | null)?.port;
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return send(res, 403, { error: 'bad host' });
       const url = new URL(req.url ?? '/', `http://${host}`);
-      if (req.method !== 'GET' && req.headers['x-hidforge-token'] !== token) return send(res, 403, { error: 'missing or bad token' });
+      // Token for every change, and for GETs that spawn processes (a cross-site page can fire simple GETs).
+      const spawns = /^\/api\/(diagnostics|agents\/[\w-]+\/models)$/.test(url.pathname) || (url.pathname === '/api/agents' && url.searchParams.get('refresh') === '1');
+      if ((req.method !== 'GET' || spawns) && req.headers['x-hidforge-token'] !== token) return send(res, 403, { error: 'missing or bad token' });
 
       if (url.pathname === '/api/stream') return stream(req, res, url);
       if (!url.pathname.startsWith('/api/')) return serveStatic(url.pathname, res);

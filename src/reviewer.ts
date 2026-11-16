@@ -5,6 +5,7 @@ import { existsSync, readdirSync, rmSync } from 'node:fs';
 import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, Conflict, DEFAULT_REVIEW_POLICY, TASK_STATUSES, type Project, type ReviewPolicy, type Task } from './store.ts';
 import type { AgentAdapter } from './adapters/types.ts';
+import { cleanModel } from './contract.ts';
 import { killTree, isAlive, maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
 
@@ -33,7 +34,7 @@ export function normalizeReviewPolicy(raw: unknown, knownProvider: (id: string) 
   if (!['off', 'advisory', 'required'].includes(mode)) throw new BadRequest('reviewPolicy.mode must be off, advisory or required');
   const provider = String(o.provider ?? 'auto');
   if (provider !== 'auto' && !knownProvider(provider)) throw new BadRequest(`unknown reviewer provider ${provider}`);
-  const model = o.model ? String(o.model) : null;
+  const model = cleanModel(o.model);
   return { mode: mode as ReviewPolicy['mode'], provider, model };
 }
 
@@ -192,7 +193,7 @@ export class Reviewer {
     this.active.add(taskId);
     try {
       const { adapter, provider } = await resolveReadOnlyAgent(this.orch, o.provider ?? pol.provider, 'reviewer');
-      const model = o.model !== undefined ? o.model : pol.model;
+      const model = o.model !== undefined ? cleanModel(o.model) : pol.model;
       t = store.getTask(taskId);
       if (t.status !== 'review') throw new Conflict(`task is ${t.status}`);
       t = this.save(taskId, { status: 'running', attempt: t.attempts, provider, model, pid: null, at: new Date().toISOString() });

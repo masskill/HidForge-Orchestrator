@@ -1,5 +1,15 @@
 // Task contract (prompt) given to a worker, and the verification-command policy.
-import type { Project, Task } from './store.ts';
+import { BadRequest, type Project, type Task } from './store.ts';
+
+/** Model ids are passed as a separate argv value after `--model`; reject anything a CLI could read as a flag. */
+const MODEL_RE = /^[A-Za-z0-9][\w.:/@[\],=+-]{0,127}$/;
+export function cleanModel(v: unknown): string | null {
+  if (v === undefined || v === null || v === '') return null;
+  const m = String(v).trim();
+  if (!m) return null;
+  if (!MODEL_RE.test(m)) throw new BadRequest(`invalid model name "${m.slice(0, 60)}": letters, digits and . _ : / @ [ ] , = + - only, not starting with -`);
+  return m;
+}
 
 export const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'] as const;
 
