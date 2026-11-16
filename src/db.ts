@@ -100,6 +100,8 @@ const MIGRATIONS: string[] = [
   `,
   // v3: AI reviewer policy per project (JSON: { mode: off|advisory|required, provider, model })
   `alter table projects add column review_policy text;`,
+  // v4: spend limits (USD): per project (HidForge stops starting runs) and per task (passed to CLIs with a native cap)
+  `alter table projects add column budget_usd real; alter table tasks add column max_budget_usd real;`,
 ];
 
 export function openDb(file: string): DatabaseSync {

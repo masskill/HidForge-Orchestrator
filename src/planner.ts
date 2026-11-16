@@ -148,7 +148,7 @@ export class Planner {
       await ws.addDetached(p.repoPath, p.baseBranch, dir);
       const existing = store.listTasks(p.id);
       const files = (await git(dir, ['ls-files'])).stdout.split(NL).filter(Boolean).slice(0, 400);
-      const inv = adapter.buildInvocation({ prompt: buildPlanPrompt(p, existing, maxTasks, files), workspace: dir, model: plan.model, policy: 'read-only' });
+      const inv = adapter.buildInvocation({ prompt: buildPlanPrompt(p, existing, maxTasks, files), workspace: dir, model: plan.model, policy: 'read-only', trustWorkspace: this.orch.trusts(plan.provider) });
       const run = runOnce(adapter, inv, dir, {
         timeoutMs, stallMs: this.orch.opts.stallTimeoutSec * 1000,
         onEvent: (ev, stream) => {

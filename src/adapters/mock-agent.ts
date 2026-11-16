@@ -9,7 +9,7 @@ import path from 'node:path';
 interface Directive {
   sleepMs?: number; steps?: number; write?: Record<string, string>;
   exit?: number; mode?: 'ok' | 'hang' | 'crash' | 'noresult';
-  failAttempts?: number; hangAttempts?: number; grandchild?: boolean; echoArgs?: boolean;
+  failAttempts?: number; hangAttempts?: number; grandchild?: boolean; echoArgs?: boolean; costUsd?: number;
   plan?: unknown; planRaw?: string; // planner-mode overrides
   // reviewer-mode overrides: verdict object or verdict name; request changes while attempt <= reviewAttempts
   review?: unknown; reviewRaw?: string; reviewAttempts?: number; reviewHang?: boolean; reviewWrite?: Record<string, string>;
@@ -84,7 +84,7 @@ async function main() {
     out({ type: 'tool', text: `wrote ${rel}` });
   }
   if ((d.failAttempts ?? 0) >= attempt) { out({ type: 'result', ok: false, text: 'simulated failure' }); process.exit(1); }
-  if (d.mode !== 'noresult') out({ type: 'result', ok: true, text: 'done', usage: { input_tokens: 0, output_tokens: 0 } });
+  if (d.mode !== 'noresult') out({ type: 'result', ok: true, text: 'done', usage: { input_tokens: 0, output_tokens: 0, ...(d.costUsd ? { total_cost_usd: d.costUsd } : {}) } });
   process.exit(d.exit ?? 0);
 }
 

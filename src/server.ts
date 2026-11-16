@@ -9,6 +9,7 @@ import { BadRequest, type HfEvent } from './store.ts';
 import { git } from './workspace.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
 import { normalizeReviewPolicy } from './reviewer.ts';
+import { projectCosts } from './costs.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
@@ -21,14 +22,24 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
   const routes: [string, RegExp, Handler][] = [
     ['GET', /^\/api\/health$/, () => ({ ok: true })],
     ['GET', /^\/api\/agents$/, (_m, _b, u) => orch.registry.status(u.searchParams.get('refresh') === '1')],
-    ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING) })],
+    ['GET', /^\/api\/agents\/([\w-]+)\/models$/, async (m) => {
+      const a = orch.registry.get(m[1]!);
+      if (!a) throw new BadRequest(`unknown agent ${m[1]}`);
+      return a.listModels ? a.listModels() : [];
+    }],
+    ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}) })],
     ['PUT', /^\/api\/settings$/, (_m, b) => {
       if (b.maxConcurrentAgents !== undefined) s.setSetting('maxConcurrentAgents', Math.max(1, Math.min(16, Number(b.maxConcurrentAgents) || 1)));
       if (b.routingPolicy !== undefined) {
         if (!['cost-first', 'balanced', 'quality-first'].includes(String(b.routingPolicy))) throw new BadRequest('bad routingPolicy');
         s.setSetting('routingPolicy', b.routingPolicy);
       }
-      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy };
+      if (b.agentTrust !== undefined) {
+        const t = b.agentTrust as Record<string, unknown>;
+        if (!t || typeof t !== 'object') throw new BadRequest('agentTrust must be an object');
+        s.setSetting('agentTrust', Object.fromEntries(Object.entries(t).filter(([k]) => orch.registry.get(k)).map(([k, v]) => [k, v === true])));
+      }
+      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}) };
     }],
     ['GET', /^\/api\/projects$/, () => s.listProjects()],
     ['POST', /^\/api\/projects$/, (_m, b) => orch.addProject(str(b.repoPath, 'repoPath'), String(b.goal ?? ''))],
@@ -38,7 +49,9 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       goal: b.goal as string | undefined,
       allowedCommands: Array.isArray(b.allowedCommands) ? b.allowedCommands.map(String) : undefined,
       reviewPolicy: b.reviewPolicy === undefined ? undefined : normalizeReviewPolicy(b.reviewPolicy, (p) => Boolean(orch.registry.get(p))),
+      budgetUsd: b.budgetUsd === undefined ? undefined : budget(b.budgetUsd),
     })],
+    ['GET', /^\/api\/projects\/(\d+)\/costs$/, (m) => projectCosts(s, id(m))],
     ['POST', /^\/api\/projects\/(\d+)\/tasks$/, (m, b) => orch.createTask(id(m), { ...b, title: str(b.title, 'title') })],
     ['POST', /^\/api\/projects\/(\d+)\/submit-all$/, (m) => orch.submitAll(id(m))],
     ['GET', /^\/api\/tasks\/(\d+)$/, (m) => ({ task: s.getTask(id(m)), runs: s.runsForTask(id(m)) })],
@@ -136,6 +149,12 @@ function send(res: http.ServerResponse, status: number, body: unknown) {
 function str(v: unknown, name: string): string {
   if (typeof v !== 'string' || !v.trim()) throw new BadRequest(`${name} is required`);
   return v;
+}
+function budget(v: unknown): number | null {
+  if (v === null || v === '') return null;
+  const x = Number(v);
+  if (!Number.isFinite(x) || x <= 0) throw new BadRequest('budgetUsd must be a positive number or null');
+  return x;
 }
 function num(u: URL, k: string): number | undefined { const v = u.searchParams.get(k); return v ? Number(v) : undefined; }
 

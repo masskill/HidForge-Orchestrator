@@ -1,5 +1,5 @@
 // Smoke test against REAL installed CLIs (uses your CLI subscription quota: one tiny task per provider).
-// Usage: node scripts/smoke-real.ts claude codex agy
+// Usage: node scripts/smoke-real.ts claude codex:gpt-5.6-luna agy   (provider[:model])
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
@@ -15,12 +15,13 @@ await orch.start();
 const p = await orch.addProject(repo, 'Smoke test of real CLI adapters');
 const st = await orch.registry.status();
 const ids = new Map<string, number>();
-for (const prov of providers) {
+for (const spec of providers) {
+  const [prov, model] = spec.split(':') as [string, string | undefined];
   const s = st.find((x) => x.id === prov);
   console.log(`${prov}: installed=${s?.installed} auth=${s?.auth} available=${s?.available} ${s?.reason ?? ''}`);
   const file = `smoke-${prov}.txt`;
   const t = orch.createTask(p.id, {
-    title: `Create ${file}`, provider: prov, model: prov === 'claude' ? 'haiku' : null, maxAttempts: 1, timeoutSec: 300,
+    title: `Create ${file}`, provider: prov, model: model ?? (prov === 'claude' ? 'haiku' : null), maxAttempts: 1, timeoutSec: 300,
     allowedPaths: [file], description: `Create a file named ${file} in the repository root containing exactly the text: hello from ${prov}\nDo not create or modify any other file. Do not run shell commands.`,
   });
   ids.set(prov, t.id);

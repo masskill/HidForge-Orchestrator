@@ -2,7 +2,7 @@
 
 ## Принципи
 1. **Жодних bypass-прапорців.** Адаптери ніколи не передають `--dangerously-skip-permissions`, `--yolo`, `--dangerously-bypass-approvals-and-sandbox`, `danger-full-access`, `--force`, `--trust`. Перевіряє тест `real adapters never emit permission-bypass flags`.
-2. **Розділення режимів**: `read-only` (Claude `--permission-mode plan`, Codex `--sandbox read-only`, agy `--mode plan`, Cursor `--mode ask`) і `workspace-write` (Claude `acceptEdits`, Codex `workspace-write`, agy `accept-edits --sandbox`). Привілейовані дії (push, deploy, видалення, зміни secrets/глобального середовища) оркестратор не виконує взагалі.
+2. **Розділення режимів**: `read-only` (Claude `--permission-mode plan`, Codex `--sandbox read-only`, agy `--mode plan`, Cursor `--mode plan`) і `workspace-write` (Claude `acceptEdits`, Codex `workspace-write`, agy `accept-edits --sandbox`). Привілейовані дії (push, deploy, видалення, зміни secrets/глобального середовища) оркестратор не виконує взагалі.
 3. **Без shell.** Усі процеси — `spawn(file, argv, { shell: false })`. Windows `.cmd`-шими розгортаються до `.exe`/`.js`; невідомий шим не запускається (захист від CVE-2024-27980 / ін'єкцій через cmd.exe).
 4. **Немає довіри до результату агента**: незалежні gate-и після кожного запуску — git-коміт змін оркестратором, перевірка `allowedPaths` (включно з `..` та абсолютними шляхами), маркери конфліктів, команди перевірки. Merge — лише після ручного `Approve & Merge`.
 5. **Команди перевірки** (`verifyCommands`):
@@ -29,5 +29,5 @@
 
 ## Відомі обмеження
 - Codex на Windows: якість sandbox-у `workspace-write` залежить від версії Codex.
-- Cursor-адаптер не перевірено локально (CLI не встановлено).
+- Cursor headless працює лише в «довіреному» каталозі. HidForge передає `--trust` тільки після явного ввімкнення користувачем у Налаштуваннях (налаштування `agentTrust`, типово вимкнено); `--force`/`--yolo` не передаються ніколи.
 - Немає автентифікації користувачів — розраховано на одного локального користувача.

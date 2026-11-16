@@ -11,7 +11,7 @@ const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { retur
 const state = {
   projects: [], agents: null, settings: null, projectId: null, project: null, tasks: [], plans: [], activity: [],
   page: 'overview', taskId: null, editing: null, filter: ls.get('hf-filter') || 'all', query: '', showCanceled: false,
-  detailTab: 'log', es: null, live: false,
+  detailTab: 'log', es: null, live: false, costs: null, models: {},
 };
 const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'QA', 'Security Reviewer', 'Integrator'];
 const PAGES = [
@@ -54,6 +54,25 @@ function reviewBlocker(t) {
   if (rv.verdict !== 'approve') return `AI-рецензент: ${REVIEW_VERDICT[rv.verdict]?.[0] ?? rv.verdict}`;
   return null;
 }
+const usd = (v) => `$${(v ?? 0).toFixed(2)}`;
+/** Model text input with suggestions from the selected agent's own model list (`/api/agents/:id/models`). */
+function ModelInput(providerSel, value) {
+  const id = `models-${Math.random().toString(36).slice(2)}`;
+  const list = h('datalist', { id });
+  const input = TextInput({ value: value ?? '', placeholder: 'за замовчуванням', list: id, autocomplete: 'off' });
+  const fill = async () => {
+    const p = providerSel.value;
+    if (!p || p === 'auto' || p === 'mock') { list.replaceChildren(); return; }
+    state.models[p] ??= api('GET', `/api/agents/${p}/models`).catch(() => []);
+    const models = await state.models[p];
+    list.replaceChildren(...models.map((m) => h('option', { value: m.id }, m.label)));
+    input.title = models.length ? `${models.length} моделей від ${p}` : `${p} не надає списку моделей — впишіть назву вручну`;
+  };
+  providerSel.addEventListener('change', fill);
+  fill();
+  return h('div', {}, input, list);
+}
+const modelValue = (wrap) => wrap.querySelector('input').value.trim() || null;
 const clean = (...n) => n.flat().filter((x) => x != null && x !== false); // replaceChildren() would print "null"
 const mount = (...n) => $('#page').replaceChildren(...clean(n));
 const count = (statuses) => state.tasks.filter((t) => statuses.includes(t.status)).length;
@@ -108,6 +127,7 @@ async function reloadProject() {
     api('GET', `/api/projects/${state.projectId}`), api('GET', `/api/projects/${state.projectId}/plans`),
     api('GET', `/api/events?projectId=${state.projectId}&type=task.status&limit=100000`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
+  state.costs = await api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null);
 }
 async function selectProject(id) {
   state.projectId = id; state.taskId = null; state.editing = null;
@@ -158,7 +178,9 @@ function overviewPage() {
       StatCard({ label: 'Виконується', value: count(ACTIVE), tone: 'info', hint: `з них у роботі: ${count(['running'])}` }),
       StatCard({ label: 'Потребують уваги', value: count(ATTENTION), tone: 'warning', hint: 'рев\'ю та запитання' }),
       StatCard({ label: 'Злито', value: count(['merged']), tone: 'success' }),
-      StatCard({ label: 'Проблеми', value: count(PROBLEM), tone: count(PROBLEM) ? 'danger' : undefined, hint: 'помилка / заблоковано' })),
+      StatCard({ label: 'Проблеми', value: count(PROBLEM), tone: count(PROBLEM) ? 'danger' : undefined, hint: 'помилка / заблоковано' }),
+      StatCard({ label: 'Витрати', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd === 0 ? 'danger' : undefined,
+        hint: state.costs?.budgetUsd != null ? `бюджет ${usd(state.costs.budgetUsd)}, лишилось ${usd(state.costs.remainingUsd)}` : 'бюджет не задано' })),
     h('div', { class: 'grid cols-2' },
       PanelCard({ title: 'Ціль проєкту', subtitle: 'З неї AI-планер будує план задач' },
         goal, h('div', { class: 'row' },
@@ -174,7 +196,21 @@ function overviewPage() {
       PanelCard({ title: 'Агенти', subtitle: 'Встановлені CLI та їхній стан', actions: GhostButton({ size: 'sm', onClick: () => go('#/agents') }, 'Детальніше') },
         state.agents ? h('div', { class: 'stack' }, ...state.agents.map((a) => { const [l, tone] = agentState(a); return h('div', { class: 'row between' }, h('span', {}, a.name, a.version ? h('span', { class: 'muted' }, ` ${a.version}`) : null), Badge(l, tone)); }))
           : h('p', { class: 'muted' }, 'Перевірка агентів…'))),
+    costsPanel(),
   );
+}
+
+function costsPanel() {
+  const c = state.costs;
+  if (!c || !c.byProvider.length) return null;
+  return PanelCard({ flush: true, title: 'Витрати за агентами', subtitle: 'Долари звітує лише Claude Code; інші CLI — тільки токени' }, Table({
+    columns: [
+      { label: 'Агент', render: (x) => (x.provider === 'mock' ? h('span', { class: 'mockflag' }, 'MOCK') : x.provider) },
+      { label: 'Сесій', render: (x) => h('span', { class: 'mono' }, x.sessions) },
+      { label: 'USD', render: (x) => h('span', { class: 'mono' }, x.sessionsWithUsd ? usd(x.usd) : '—') },
+      { label: 'Токени вводу', render: (x) => h('span', { class: 'mono' }, x.inputTokens.toLocaleString('uk-UA')) },
+      { label: 'Токени виводу', render: (x) => h('span', { class: 'mono' }, x.outputTokens.toLocaleString('uk-UA')) },
+    ], rows: c.byProvider }));
 }
 
 // ---------------------------------------------------------------- page: tasks
@@ -239,7 +275,8 @@ function taskForm(t) {
     acceptanceCriteria: Textarea(t.acceptanceCriteria, { class: 'prose' }),
     assignedRole: Select(ROLES, t.assignedRole),
     provider: Select([['auto', 'auto (за політикою)'], ...(state.agents || []).map((a) => [a.id, `${a.id}${a.available ? '' : ' (недоступний)'}`])], t.provider),
-    model: TextInput({ value: t.model ?? '', placeholder: 'за замовчуванням' }),
+    model: null,
+    maxBudgetUsd: TextInput({ type: 'number', min: 0.01, step: 0.01, value: t.maxBudgetUsd ?? '', placeholder: 'без ліміту' }),
     policy: Select([['workspace-write', 'запис у worktree'], ['read-only', 'лише читання']], t.policy),
     dependsOn: TextInput({ value: t.dependsOn.join(', '), placeholder: 'напр. 1, 2' }),
     maxAttempts: TextInput({ type: 'number', min: 1, max: 10, value: t.maxAttempts }),
@@ -247,6 +284,7 @@ function taskForm(t) {
     allowedPaths: Textarea(t.allowedPaths.join('\n'), { placeholder: 'src/api/**' }),
     verifyCommands: Textarea(t.verifyCommands.join('\n'), { placeholder: 'npm test' }),
   };
+  f.model = ModelInput(f.provider, t.model);
   const lines = (el) => el.value.split('\n').map((s) => s.trim()).filter(Boolean);
   const cancel = () => { state.editing = null; render(); };
   return PanelCard({ title: isNew ? 'Нова задача' : `Редагування #${t.id}`, subtitle: 'Контракт задачі для агента', actions: IconButton({ icon: 'close', label: 'Закрити', size: 'sm', onClick: cancel }) },
@@ -255,7 +293,7 @@ function taskForm(t) {
       const body = {
         title: f.title.value.trim(), description: f.description.value, acceptanceCriteria: f.acceptanceCriteria.value,
         dependsOn: f.dependsOn.value.split(/[\s,#]+/).filter(Boolean).map(Number), assignedRole: f.assignedRole.value,
-        provider: f.provider.value, model: f.model.value.trim() || null, policy: f.policy.value,
+        provider: f.provider.value, model: modelValue(f.model), policy: f.policy.value, maxBudgetUsd: f.maxBudgetUsd.value ? Number(f.maxBudgetUsd.value) : null,
         allowedPaths: lines(f.allowedPaths), verifyCommands: lines(f.verifyCommands),
         maxAttempts: Number(f.maxAttempts.value), timeoutSec: Number(f.timeoutSec.value),
       };
@@ -269,7 +307,7 @@ function taskForm(t) {
       Field('Роль', f.assignedRole), Field('Виконавець (CLI)', f.provider, '«auto» — за політикою автовибору'),
       Field('Модель', f.model), Field('Права', f.policy),
       Field('Залежить від', f.dependsOn, '#id через кому'), Field('Макс. спроб', f.maxAttempts),
-      Field('Таймаут, с', f.timeoutSec),
+      Field('Таймаут, с', f.timeoutSec), Field('Ліміт витрат, $', f.maxBudgetUsd, 'передається лише CLI з власним лімітом (Claude Code)'),
       Field('Дозволені шляхи', f.allowedPaths, 'glob по рядку; порожньо = будь-які', { full: true }),
       Field('Команди перевірки', f.verifyCommands, 'по рядку; запускаються без shell', { full: true })),
     h('div', { class: 'row' }, PrimaryButton({ type: 'submit', icon: 'check' }, isNew ? 'Створити чернетку' : 'Зберегти'), GhostButton({ onClick: cancel }, 'Скасувати'))));
@@ -406,11 +444,11 @@ function plannerPage() {
   const planners = (state.agents || []).filter((a) => a.available && (a.mock || a.capabilities.readOnlyMode === 'supported'));
   const goal = Textarea(p.goal, { class: 'prose', placeholder: 'Опишіть, що має бути зроблено…', 'aria-label': 'Ціль' });
   const prov = Select([['auto', 'auto (за політикою)'], ...planners.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : a.name])], 'auto');
-  const model = TextInput({ placeholder: 'за замовчуванням' });
+  const model = ModelInput(prov, null);
   const maxTasks = TextInput({ type: 'number', min: 1, max: 30, value: 12 });
   const generate = act(async () => {
     if (goal.value !== p.goal) await api('PATCH', `/api/projects/${p.id}`, { goal: goal.value });
-    await api('POST', `/api/projects/${p.id}/plans`, { provider: prov.value, model: model.value.trim() || null, maxTasks: Number(maxTasks.value) });
+    await api('POST', `/api/projects/${p.id}/plans`, { provider: prov.value, model: modelValue(model), maxTasks: Number(maxTasks.value) });
     await reloadProject(); render();
   });
   mount(
@@ -520,7 +558,9 @@ function settingsPage() {
         Field('Паралельних агентів', maxConc, 'Скільки задач можуть виконуватися одночасно'),
         Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
       PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
+    p ? budgetSettings(p) : null,
     p ? reviewSettings(p) : null,
+    trustSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
       cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
@@ -529,18 +569,40 @@ function settingsPage() {
       }) }, 'Зберегти'))) : null,
   );
 }
+function budgetSettings(p) {
+  const budget = TextInput({ type: 'number', min: 0.01, step: 0.01, value: p.budgetUsd ?? '', placeholder: 'без ліміту' });
+  const c = state.costs;
+  return PanelCard({ title: 'Бюджет проєкту', subtitle: `Витрачено ${usd(c?.totalUsd)}${p.budgetUsd != null ? ` з ${usd(p.budgetUsd)}` : ''}` },
+    h('p', { class: 'text-2', style: 'margin:0' }, 'Коли сума звітованих витрат (задачі, планер, рецензії) досягає бюджету, HidForge не запускає нових задач. Долари звітує лише Claude Code; витрати інших CLI не враховуються в сумі.'),
+    Field('Бюджет, $', budget, 'порожньо — без ліміту'),
+    h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
+      await api('PATCH', `/api/projects/${p.id}`, { budgetUsd: budget.value ? Number(budget.value) : null });
+      await reloadProject(); toast('Бюджет збережено', 'success'); render();
+    }) }, 'Зберегти')));
+}
+function trustSettings() {
+  const trust = state.settings?.agentTrust || {};
+  const cursor = (state.agents || []).find((a) => a.id === 'cursor');
+  if (!cursor?.installed) return null;
+  return PanelCard({ title: 'Довіра до робочих каталогів', subtitle: 'Cursor Agent CLI' },
+    h('div', { class: 'callout' }, h('strong', {}, 'Ваше свідоме рішення'),
+      h('div', { class: 'text-2' }, 'Cursor у headless-режимі працює лише в «довіреному» каталозі. Увімкнення передає Cursor прапорець --trust для worktree, які створює HidForge (копії вашого репозиторію). Прапорці --force / --yolo не передаються ніколи.')),
+    Toggle({ label: 'Довіряти worktree HidForge для Cursor', checked: trust.cursor === true, onChange: act(async (v) => {
+      await api('PUT', '/api/settings', { agentTrust: { ...trust, cursor: v } }); await loadSettings(); toast(v ? 'Довіру ввімкнено' : 'Довіру вимкнено', 'success'); render();
+    }) }));
+}
 function reviewSettings(p) {
   const pol = p.reviewPolicy || { mode: 'off', provider: 'auto', model: null };
   const reviewers = (state.agents || []).filter((a) => a.mock || a.capabilities.readOnlyMode === 'supported');
   const mode = Select([['off', 'Вимкнено'], ['advisory', 'Дорадчий — лише показує вердикт'], ['required', 'Обов\'язковий — merge лише після «схвалено»']], pol.mode);
   const prov = Select([['auto', 'auto (за політикою)'], ...reviewers.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : `${a.name}${a.available ? '' : ' (недоступний)'}`])], pol.provider);
-  const model = TextInput({ value: pol.model ?? '', placeholder: 'за замовчуванням' });
+  const model = ModelInput(prov, pol.model);
   return PanelCard({ title: 'AI-рецензент', subtitle: `QA + Security · проєкт «${p.name}»` },
     h('p', { class: 'text-2', style: 'margin:0' }, 'Після успішних gate-ів окремий агент у режимі лише читання перевіряє diff задачі. В обов\'язковому режимі «потрібні зміни» автоматично повертає задачу агенту із зауваженнями, а Approve & Merge доступний лише після вердикту «схвалено». Остаточне рішення завжди за вами.'),
     h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' },
       Field('Режим', mode), Field('Агент-рецензент', prov, state.agents ? null : 'перевірка агентів…'), Field('Модель', model)),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
-      await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: model.value.trim() || null } });
+      await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: modelValue(model) } });
       await reloadProject(); toast('Політику рецензії збережено', 'success'); render();
     }) }, 'Зберегти')));
 }

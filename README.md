@@ -53,6 +53,8 @@ node scripts\smoke-planner.ts claude:haiku agy
 node scripts\smoke-review.ts claude:haiku agy
 ```
 
+Бюджет і витрати: «Налаштування → Бюджет проєкту» (HidForge перестає запускати задачі, коли звітовані витрати досягли бюджету), ліміт на задачу передається Claude Code як `--max-budget-usd`; зведення витрат — на «Огляді». Довіра до каталогів для Cursor вмикається лише вручну в Налаштуваннях.
+
 Налаштування — `.env` (див. [.env.example](.env.example)): каталог даних, порт, паралелізм, stall-таймаут. За замовчуванням дані лежать у `%LOCALAPPDATA%\HidForge`.
 
 ## Як користуватися

@@ -35,7 +35,7 @@ export const DEFAULT_REVIEW_POLICY: ReviewPolicy = { mode: 'off', provider: 'aut
 
 export interface Project {
   id: number; name: string; repoPath: string; baseBranch: string; goal: string;
-  allowedCommands: string[]; reviewPolicy: ReviewPolicy; createdAt: string;
+  allowedCommands: string[]; reviewPolicy: ReviewPolicy; budgetUsd: number | null; createdAt: string;
 }
 
 export interface Evidence { ts: string; kind: string; ok: boolean; summary: string; detail?: string }
@@ -43,7 +43,7 @@ export interface Evidence { ts: string; kind: string; ok: boolean; summary: stri
 export interface Task {
   id: number; projectId: number; title: string; description: string; acceptanceCriteria: string;
   dependsOn: number[]; priority: number; assignedRole: string; provider: string; model: string | null;
-  policy: Policy; allowedPaths: string[]; verifyCommands: string[]; status: TaskStatus;
+  policy: Policy; allowedPaths: string[]; verifyCommands: string[]; status: TaskStatus; maxBudgetUsd: number | null;
   attempts: number; maxAttempts: number; timeoutSec: number;
   workspace: string | null; branch: string | null; baseCommit: string | null;
   artifacts: Record<string, unknown>; evidence: Evidence[];
@@ -81,7 +81,8 @@ function toProject(r: Row): Project {
   return {
     id: Number(r.id), name: String(r.name), repoPath: String(r.repo_path), baseBranch: String(r.base_branch),
     goal: String(r.goal), allowedCommands: pj(r.allowed_commands, []),
-    reviewPolicy: { ...DEFAULT_REVIEW_POLICY, ...pj(r.review_policy, {}) }, createdAt: String(r.created_at),
+    reviewPolicy: { ...DEFAULT_REVIEW_POLICY, ...pj(r.review_policy, {}) }, budgetUsd: r.budget_usd == null ? null : Number(r.budget_usd),
+    createdAt: String(r.created_at),
   };
 }
 
@@ -95,7 +96,7 @@ function toTask(r: Row): Task {
     timeoutSec: Number(r.timeout_sec), workspace: (r.workspace as string) ?? null, branch: (r.branch as string) ?? null,
     baseCommit: (r.base_commit as string) ?? null, artifacts: pj(r.artifacts, {}), evidence: pj(r.evidence, []),
     question: (r.question as string) ?? null, feedback: (r.feedback as string) ?? null,
-    notBefore: (r.not_before as string) ?? null, createdAt: String(r.created_at), updatedAt: String(r.updated_at),
+    notBefore: (r.not_before as string) ?? null, maxBudgetUsd: r.max_budget_usd == null ? null : Number(r.max_budget_usd), createdAt: String(r.created_at), updatedAt: String(r.updated_at),
   };
 }
 
@@ -123,11 +124,11 @@ const TASK_COLUMNS: Record<string, string> = {
   priority: 'priority', assignedRole: 'assigned_role', provider: 'provider', model: 'model', policy: 'policy',
   allowedPaths: 'allowed_paths', verifyCommands: 'verify_commands', maxAttempts: 'max_attempts', timeoutSec: 'timeout_sec',
   workspace: 'workspace', branch: 'branch', baseCommit: 'base_commit', artifacts: 'artifacts', evidence: 'evidence',
-  question: 'question', feedback: 'feedback', notBefore: 'not_before', attempts: 'attempts',
+  question: 'question', feedback: 'feedback', notBefore: 'not_before', attempts: 'attempts', maxBudgetUsd: 'max_budget_usd',
 };
 const JSON_FIELDS = new Set(['dependsOn', 'allowedPaths', 'verifyCommands', 'artifacts', 'evidence']);
 export const EDITABLE_FIELDS = ['title', 'description', 'acceptanceCriteria', 'dependsOn', 'priority', 'assignedRole',
-  'provider', 'model', 'policy', 'allowedPaths', 'verifyCommands', 'maxAttempts', 'timeoutSec'] as const;
+  'provider', 'model', 'policy', 'allowedPaths', 'verifyCommands', 'maxAttempts', 'timeoutSec', 'maxBudgetUsd'] as const;
 
 export class Store {
   readonly bus = new EventEmitter();
@@ -153,10 +154,11 @@ export class Store {
     if (!r) throw new NotFound(`project ${id}`);
     return toProject(r);
   }
-  updateProject(id: number, patch: { goal?: string; name?: string; allowedCommands?: string[]; reviewPolicy?: ReviewPolicy }): Project {
+  updateProject(id: number, patch: { goal?: string; name?: string; allowedCommands?: string[]; reviewPolicy?: ReviewPolicy; budgetUsd?: number | null }): Project {
     const p = this.getProject(id);
-    this.db.prepare('update projects set goal = ?, name = ?, allowed_commands = ?, review_policy = ? where id = ?')
-      .run(patch.goal ?? p.goal, patch.name ?? p.name, j(patch.allowedCommands ?? p.allowedCommands), j(patch.reviewPolicy ?? p.reviewPolicy), id);
+    this.db.prepare('update projects set goal = ?, name = ?, allowed_commands = ?, review_policy = ?, budget_usd = ? where id = ?')
+      .run(patch.goal ?? p.goal, patch.name ?? p.name, j(patch.allowedCommands ?? p.allowedCommands), j(patch.reviewPolicy ?? p.reviewPolicy),
+        patch.budgetUsd === undefined ? p.budgetUsd : patch.budgetUsd, id);
     return this.getProject(id);
   }
 

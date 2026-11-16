@@ -21,9 +21,9 @@
 - ✅ Claude Code: реальний прогін задачі й планера
 - 🟡 Codex CLI: адаптер і розбір подій готові; реальний прогін блокує модель у `~/.codex/config.toml` користувача
 - ✅ Antigravity `agy`: реальний прогін задачі й планера без bypass
-- 🟡 Cursor Agent CLI: адаптер є, локально не перевірено (CLI не встановлено)
+- 🟡 Cursor Agent CLI: встановлено й авторизовано, запуск без PowerShell, список моделей ✅; headless-прогін потребує довіри до каталогу — лише після вашого ввімкнення в Налаштуваннях (без нього не перевірено)
 - ✅ Capability-based degradation: недоступний CLI не зупиняє проєкт
-- ⬜ Ліміти вартості (`--max-budget-usd`), список моделей (`agy models`, тощо)
+- ✅ Ліміти вартості: бюджет проєкту (зупиняє нові запуски) і ліміт задачі (`claude --max-budget-usd`); списки моделей з CLI (`agy models`, `cursor-agent models`, аліаси Claude) у підказках UI
 
 ## Етап 3 — робочий UI
 - ✅ Dashboard: Projects / Tasks / Agents / Runs / Logs / Changes / Settings
@@ -38,7 +38,7 @@
 - ✅ Автовибір агента за доступністю та політикою (cost-first / balanced / quality-first)
 - ✅ Reviewer / repair loop: gate-и + repair-спроби; AI-рецензент QA + Security (advisory / required, repair із findings, API, UI), реальний прогін на Claude Code та agy
 - 🟡 Інтеграційний агент: repair конфлікту в тій самій задачі ✅; окремий Integrator ⬜
-- 🟡 Облік витрат: usage на кожен запуск ✅; зведення по проєкту/провайдеру ⬜
+- ✅ Облік витрат: usage кожного запуску, планера й рецензії; зведення по проєкту й агентах (USD від Claude Code, токени від усіх)
 - ⬜ Зрозумілі звіти по проєкту
 - 🟡 Пам'ять рішень: evidence, історія, відновлюваний план ✅; автоматичні ADR ⬜
 

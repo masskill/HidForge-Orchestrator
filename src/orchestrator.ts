@@ -14,6 +14,7 @@ import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } f
 import { buildPrompt, commandDecision } from './contract.ts';
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
+import { projectCosts } from './costs.ts';
 
 export interface OrchestratorOptions {
   dataDir: string;
@@ -56,6 +57,8 @@ export class Orchestrator {
   }
 
   get maxConcurrent(): number { return this.store.getSetting('maxConcurrentAgents', this.opts.maxConcurrent); }
+  /** Explicit per-agent user opt-in to trust HidForge worktrees (Cursor). Off unless the user enabled it. */
+  trusts(provider: string): boolean { return this.store.getSetting<Record<string, boolean>>('agentTrust', {})[provider] === true; }
   get routingPolicy(): RoutingPolicy { return this.store.getSetting('routingPolicy', 'balanced' as RoutingPolicy); }
 
   async start(): Promise<void> {
@@ -139,6 +142,7 @@ export class Orchestrator {
     if (Array.isArray(out.dependsOn)) out.dependsOn = (out.dependsOn as unknown[]).map(Number);
     if (out.maxAttempts !== undefined) out.maxAttempts = Math.max(1, Math.min(10, Number(out.maxAttempts)));
     if (out.timeoutSec !== undefined) out.timeoutSec = Math.max(5, Number(out.timeoutSec));
+    if (out.maxBudgetUsd !== undefined) out.maxBudgetUsd = out.maxBudgetUsd === null || out.maxBudgetUsd === '' ? null : Math.max(0.01, Number(out.maxBudgetUsd)) || null;
     return out as Partial<Task>;
   }
 
@@ -298,6 +302,10 @@ export class Orchestrator {
     }
 
     const p = this.store.getProject(t.projectId);
+    if (p.budgetUsd != null) {
+      const spent = projectCosts(this.store, p.id).totalUsd;
+      if (spent >= p.budgetUsd) { this.failTask(t, `project budget exhausted: spent $${spent.toFixed(2)} of $${p.budgetUsd.toFixed(2)} (raise the budget, then retry)`); return false; }
+    }
     let w: Awaited<ReturnType<WorkspaceManager['ensure']>>;
     try {
       w = await this.ws.ensure(p.repoPath, p.baseBranch, p.id, t.id, t.workspace);
@@ -310,7 +318,7 @@ export class Orchestrator {
     catch (e) { if (e instanceof Conflict) return false; throw e; }
 
     const prompt = buildPrompt(t, p, run.attempt);
-    const inv = adapter.buildInvocation({ prompt, workspace: w.workspace, model: t.model, policy: t.policy });
+    const inv = adapter.buildInvocation({ prompt, workspace: w.workspace, model: t.model, policy: t.policy, maxBudgetUsd: t.maxBudgetUsd, trustWorkspace: this.trusts(t.provider) });
     this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.started',
       data: { attempt: run.attempt, provider: t.provider, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });
 

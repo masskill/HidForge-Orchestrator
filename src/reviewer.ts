@@ -213,7 +213,7 @@ export class Reviewer {
       await ws.addDetached(p.repoPath, t.branch!, dir);
       const files = await ws.changedFiles(dir, t.baseCommit!);
       const diff = maskSecrets(await ws.diff(dir, t.baseCommit!));
-      const inv = adapter.buildInvocation({ prompt: buildReviewPrompt(t, p, attempt, diff, files), workspace: dir, model, policy: 'read-only' });
+      const inv = adapter.buildInvocation({ prompt: buildReviewPrompt(t, p, attempt, diff, files), workspace: dir, model, policy: 'read-only', trustWorkspace: this.orch.trusts(provider) });
       session = runOnce(adapter, inv, dir, {
         timeoutMs: Math.max(t.timeoutSec, 300) * 1000, stallMs: this.orch.opts.stallTimeoutSec * 1000,
         onEvent: (ev, stream) => {

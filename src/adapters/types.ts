@@ -39,7 +39,12 @@ export interface Invocation {
   stdin: string | null;   // prompt goes through stdin, never argv
 }
 
-export interface StartContext { prompt: string; workspace: string; model: string | null; policy: Policy }
+export interface StartContext {
+  prompt: string; workspace: string; model: string | null; policy: Policy;
+  maxBudgetUsd?: number | null;  // passed only to CLIs with a native spend cap (claude --max-budget-usd)
+  trustWorkspace?: boolean;      // explicit user opt-in per agent (Cursor workspace trust); never on by default
+}
+export interface ModelInfo { id: string; label: string }
 
 /** The single interface every provider implements. Runtime (spawn/stream/cancel) is shared in runner.ts. */
 export interface AgentAdapter {
@@ -52,4 +57,6 @@ export interface AgentAdapter {
   notes(): string[];
   buildInvocation(ctx: StartContext): Invocation;
   parseLine(line: string): AgentEvent | null;
+  /** Models this account can use (from the CLI itself); empty if the CLI cannot list them. */
+  listModels?(): Promise<ModelInfo[]>;
 }

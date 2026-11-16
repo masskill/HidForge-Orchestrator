@@ -1,6 +1,6 @@
 // Safe process utilities: no shell, Windows shim unwrapping, process-tree kill, secret masking.
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const isWin = process.platform === 'win32';
@@ -43,11 +43,26 @@ function unwrapShim(shimPath: string): Resolved | null {
   const re = /%~?dp0%?\\?([^"%*\r\n]+?\.(?:exe|js|cjs|mjs))/gi;
   let last: string | null = null;
   for (const m of text.matchAll(re)) last = m[1]!;
+  if (!last && /\.ps1\b/i.test(text)) return versionedNodeLauncher(dir);
   if (!last) return null;
   const target = path.resolve(dir, last);
   if (!existsSync(target)) return null;
   if (/\.exe$/i.test(target)) return { file: target, prefixArgs: [] };
   return { file: process.execPath, prefixArgs: [target] };
+}
+
+/**
+ * Shims that call a PowerShell launcher which runs `versions\<YYYY.MM.DD-hash>\node.exe index.js`
+ * (Cursor Agent CLI layout). We run the newest such version directly instead of going through powershell.
+ */
+function versionedNodeLauncher(dir: string): Resolved | null {
+  const root = path.join(dir, 'versions');
+  if (!existsSync(root)) return null;
+  const key = (n: string) => n.split('-')[0]!.split('.').map((x) => x.padStart(4, '0')).join('');
+  const ver = readdirSync(root).filter((n) => /^\d{4}\.\d{1,2}\.\d{1,2}(-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/.test(n))
+    .filter((n) => isFile(path.join(root, n, 'node.exe')) && isFile(path.join(root, n, 'index.js')))
+    .sort((a, b) => key(a).localeCompare(key(b)) || a.localeCompare(b)).at(-1);
+  return ver ? { file: path.join(root, ver, 'node.exe'), prefixArgs: [path.join(root, ver, 'index.js')] } : null;
 }
 
 /** Split a command line into argv (supports "double" and 'single' quotes). Never uses a shell. */
