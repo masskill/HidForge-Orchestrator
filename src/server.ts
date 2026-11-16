@@ -8,6 +8,7 @@ import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, type HfEvent } from './store.ts';
 import { git } from './workspace.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
+import { normalizeReviewPolicy } from './reviewer.ts';
 
 type Handler = (m: RegExpMatchArray, body: Record<string, unknown>, url: URL, res: http.ServerResponse) => Promise<unknown> | unknown;
 
@@ -36,6 +37,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     ['PATCH', /^\/api\/projects\/(\d+)$/, (m, b) => s.updateProject(id(m), {
       goal: b.goal as string | undefined,
       allowedCommands: Array.isArray(b.allowedCommands) ? b.allowedCommands.map(String) : undefined,
+      reviewPolicy: b.reviewPolicy === undefined ? undefined : normalizeReviewPolicy(b.reviewPolicy, (p) => Boolean(orch.registry.get(p))),
     })],
     ['POST', /^\/api\/projects\/(\d+)\/tasks$/, (m, b) => orch.createTask(id(m), { ...b, title: str(b.title, 'title') })],
     ['POST', /^\/api\/projects\/(\d+)\/submit-all$/, (m) => orch.submitAll(id(m))],
@@ -48,6 +50,10 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     ['POST', /^\/api\/tasks\/(\d+)\/approve$/, (m) => orch.approve(id(m))],
     ['POST', /^\/api\/tasks\/(\d+)\/reject$/, (m, b) => orch.reject(id(m), String(b.feedback ?? ''), b.retry !== false)],
     ['POST', /^\/api\/tasks\/(\d+)\/answer$/, (m, b) => orch.answer(id(m), b.allow === true)],
+    ['POST', /^\/api\/tasks\/(\d+)\/review$/, (m, b) => orch.reviewer.start(id(m), {
+      provider: b.provider ? String(b.provider) : undefined, model: b.model === undefined ? undefined : (b.model ? String(b.model) : null),
+    })],
+    ['POST', /^\/api\/tasks\/(\d+)\/review\/cancel$/, (m) => orch.reviewer.cancel(id(m))],
     ['GET', /^\/api\/tasks\/(\d+)\/diff$/, async (m) => ({ diff: await orch.diff(id(m)) })],
     ['GET', /^\/api\/projects\/(\d+)\/plans$/, (m) => s.listPlans(id(m))],
     ['POST', /^\/api\/projects\/(\d+)\/plans$/, (m, b) => orch.planner.start(id(m), {

@@ -98,6 +98,8 @@ const MIGRATIONS: string[] = [
   -- one running planner per project
   create unique index plans_one_running_per_project on plans(project_id) where status = 'running';
   `,
+  // v3: AI reviewer policy per project (JSON: { mode: off|advisory|required, provider, model })
+  `alter table projects add column review_policy text;`,
 ];
 
 export function openDb(file: string): DatabaseSync {

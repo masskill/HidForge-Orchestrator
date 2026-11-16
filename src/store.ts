@@ -29,9 +29,13 @@ export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   return TRANSITIONS[from].includes(to);
 }
 
+export type ReviewMode = 'off' | 'advisory' | 'required';
+export interface ReviewPolicy { mode: ReviewMode; provider: string; model: string | null }
+export const DEFAULT_REVIEW_POLICY: ReviewPolicy = { mode: 'off', provider: 'auto', model: null };
+
 export interface Project {
   id: number; name: string; repoPath: string; baseBranch: string; goal: string;
-  allowedCommands: string[]; createdAt: string;
+  allowedCommands: string[]; reviewPolicy: ReviewPolicy; createdAt: string;
 }
 
 export interface Evidence { ts: string; kind: string; ok: boolean; summary: string; detail?: string }
@@ -76,7 +80,8 @@ const pj = <T>(v: unknown, d: T): T => { try { return v == null ? d : JSON.parse
 function toProject(r: Row): Project {
   return {
     id: Number(r.id), name: String(r.name), repoPath: String(r.repo_path), baseBranch: String(r.base_branch),
-    goal: String(r.goal), allowedCommands: pj(r.allowed_commands, []), createdAt: String(r.created_at),
+    goal: String(r.goal), allowedCommands: pj(r.allowed_commands, []),
+    reviewPolicy: { ...DEFAULT_REVIEW_POLICY, ...pj(r.review_policy, {}) }, createdAt: String(r.created_at),
   };
 }
 
@@ -148,10 +153,10 @@ export class Store {
     if (!r) throw new NotFound(`project ${id}`);
     return toProject(r);
   }
-  updateProject(id: number, patch: { goal?: string; name?: string; allowedCommands?: string[] }): Project {
+  updateProject(id: number, patch: { goal?: string; name?: string; allowedCommands?: string[]; reviewPolicy?: ReviewPolicy }): Project {
     const p = this.getProject(id);
-    this.db.prepare('update projects set goal = ?, name = ?, allowed_commands = ? where id = ?')
-      .run(patch.goal ?? p.goal, patch.name ?? p.name, j(patch.allowedCommands ?? p.allowedCommands), id);
+    this.db.prepare('update projects set goal = ?, name = ?, allowed_commands = ?, review_policy = ? where id = ?')
+      .run(patch.goal ?? p.goal, patch.name ?? p.name, j(patch.allowedCommands ?? p.allowedCommands), j(patch.reviewPolicy ?? p.reviewPolicy), id);
     return this.getProject(id);
   }
 

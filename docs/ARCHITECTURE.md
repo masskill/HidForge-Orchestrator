@@ -1,4 +1,4 @@
-# Архітектура HidForge Orchestrator (v0.1)
+# Архітектура HidForge Orchestrator (v0.3)
 
 ```
  Browser UI (web/*.js)  ── REST + SSE (127.0.0.1, token for mutations) ──┐
@@ -30,7 +30,7 @@
 | AgentAdapter | `adapters/types.ts`; `cli.ts` (декларативні специфікації), `MockAdapter` |
 | SessionManager | `Handle` в orchestrator: pid, stdout/stderr → events, timeout, stall, cancel, recovery |
 | WorkspaceManager | `workspace.ts` — worktree на задачу, commit, diff, allowedPaths, clean-up після merge |
-| ReviewEngine | `Orchestrator.runGates` — зміни є, allowedPaths, маркери конфліктів, команди перевірки, repair loop |
+| ReviewEngine | `Orchestrator.runGates` — зміни є, allowedPaths, маркери конфліктів, команди перевірки, repair loop; `reviewer.ts` — AI-рецензент QA + Security (див. нижче) |
 | IntegrationManager | `doApprove` (серіалізований merge `--no-ff`, abort при конфлікті), post-merge checks, `rebaseOntoBase` |
 | Persistence | `db.ts` — `node:sqlite`, WAL, міграції `schema_migrations` |
 | API | `server.ts` — REST + SSE `/api/stream` з replay `after`/`Last-Event-ID` |
@@ -43,6 +43,7 @@ draft ─submit→ ready ─(усі deps merged)→ queued ─(слот)→ runn
 running ─exit 0 + result→ review ─gates OK→ (людина) Approve → accepted → merged
 running ─crash/timeout/stall/no result→ queued (retry, backoff)  або failed (спроби вичерпано)
 review ─gate fail→ queued (repair з feedback) або blocked
+review ─AI review (required): request_changes→ queued (repair із findings) / reject→ blocked
 review ─невідома команда перевірки→ needs_user_input ─дозволити→ review / ─заборонити→ blocked
 accepted ─конфлікт merge→ blocked ─Retry→ queued (база зливається у гілку задачі, агент розв'язує)
 будь-який активний ─Cancel→ canceled (kill дерева процесів)
@@ -71,5 +72,23 @@ accepted ─конфлікт merge→ blocked ─Retry→ queued (база зл�
 - Після рестарту активний планер позначається `failed` (його процес убивається) — сесії планування не відновлюються.
 - API: `POST/GET /api/projects/:id/plans`, `GET /api/plans/:id`, `POST /api/plans/:id/{apply,cancel,discard}`.
 
+## AI-рецензент (`src/reviewer.ts`)
+
+```
+gates OK ─▶ reviewPolicy.mode ≠ off ─▶ Reviewer.autoStart ─▶ git worktree --detach <гілка задачі> (тимчасовий, dataDir\reviewing)
+   агент у read-only режимі (той самий вибір, що й у планера: resolveReadOnlyAgent + runOnce з src/oneshot.ts)
+   prompt: роль «QA + Security Reviewer», ціль, контракт задачі, критерії, allowedPaths, результати перевірок
+           поточної спроби, змінені файли, diff (≤ 80 000 символів), застереження про prompt injection, без shell
+─▶ parseReview: {verdict: approve | request_changes | reject, summary, findings[{severity, file, line?, message}]}
+─▶ task.artifacts.aiReview + evidence `ai-review` + події review.output / review.status
+```
+- Політика на проєкт (`projects.review_policy`, міграція v3): `mode` = `off` (типово) | `advisory` | `required`, `provider` (`auto` за політикою маршрутизації або конкретний CLI), `model`.
+- `advisory`: вердикт лише інформує, статус задачі не змінюється.
+- `required`: `Approve & Merge` дозволено лише з вердиктом `approve` для поточної спроби; `request_changes` → `queued` із findings як feedback (repair-спроба; якщо спроби вичерпано — `blocked`); `reject` → `blocked`; збій/невалідна відповідь рецензента → merge заблоковано до повторної рецензії або зміни політики.
+- `approve` з `critical`-знахідкою автоматично знижується до `request_changes`.
+- Наслідки застосовуються лише якщо задача ще в `review` на тій самій спробі; Cancel/Reject задачі вбиває рецензента.
+- Після рестарту активна рецензія → `failed` (процес убивається, тимчасові worktree прибираються), повтор — вручну.
+- API: `PATCH /api/projects/:id {reviewPolicy}`, `POST /api/tasks/:id/review`, `POST /api/tasks/:id/review/cancel`.
+
 ## Розміщення даних
-`HIDFORGE_DATA_DIR` (за замовчуванням `%LOCALAPPDATA%\HidForge`): `hidforge.db`, `worktrees\p<project>\t<task>`, `demo\`. Worktree-и лежать поза репозиторієм користувача; гілки — `hidforge/p<project>-t<task>`.
+`HIDFORGE_DATA_DIR` (за замовчуванням `%LOCALAPPDATA%\HidForge`): `hidforge.db`, `worktrees\p<project>\t<task>`, тимчасові `planning\` і `reviewing\`, `demo\`. Worktree-и лежать поза репозиторієм користувача; гілки — `hidforge/p<project>-t<task>`.

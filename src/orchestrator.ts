@@ -13,6 +13,7 @@ import type { AgentAdapter, AgentEvent } from './adapters/types.ts';
 import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } from './proc.ts';
 import { buildPrompt, commandDecision } from './contract.ts';
 import { Planner } from './planner.ts';
+import { Reviewer } from './reviewer.ts';
 
 export interface OrchestratorOptions {
   dataDir: string;
@@ -36,6 +37,7 @@ export class Orchestrator {
   readonly registry: AgentRegistry;
   readonly ws: WorkspaceManager;
   readonly planner: Planner;
+  readonly reviewer: Reviewer;
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -50,12 +52,14 @@ export class Orchestrator {
     this.registry = new AgentRegistry(o.adapters ?? defaultAdapters());
     this.ws = new WorkspaceManager(path.join(this.opts.dataDir, 'worktrees'));
     this.planner = new Planner(this);
+    this.reviewer = new Reviewer(this);
   }
 
   get maxConcurrent(): number { return this.store.getSetting('maxConcurrentAgents', this.opts.maxConcurrent); }
   get routingPolicy(): RoutingPolicy { return this.store.getSetting('routingPolicy', 'balanced' as RoutingPolicy); }
 
   async start(): Promise<void> {
+    await this.reviewer.recover(); // first: recover() may re-run gates, which can start fresh reviews
     await this.recover();
     await this.planner.recover();
     this.timer = setInterval(() => { void this.tick(); }, this.opts.tickMs);
@@ -67,6 +71,7 @@ export class Orchestrator {
     this.timer = null;
     await this.tickSettled();
     await this.planner.stop();
+    await this.reviewer.stop();
     await Promise.all([...this.handles.values()].map(async (h) => { if (h.child.pid) await killTree(h.child.pid); await h.exited; }));
     await this.idle();
     this.store.db.close();
@@ -82,6 +87,7 @@ export class Orchestrator {
     for (const h of this.handles.values()) { h.done = true; h.child.stdout?.destroy(); h.child.stderr?.destroy(); }
     this.handles.clear();
     this.planner.abandon();
+    this.reviewer.abandon();
     this.store.db.close();
   }
 
@@ -146,6 +152,7 @@ export class Orchestrator {
     const h = [...this.handles.values()].find((x) => x.taskId === id);
     const task = this.store.setStatus(id, 'canceled', {}, 'canceled by user');
     if (h) { h.canceled = true; if (h.child.pid) await killTree(h.child.pid); await h.exited; }
+    await this.reviewer.killFor(id);
     return task;
   }
 
@@ -160,6 +167,7 @@ export class Orchestrator {
     const t = this.store.getTask(id);
     if (!['review', 'needs_user_input'].includes(t.status)) throw new Conflict(`cannot reject a ${t.status} task`);
     this.store.addEvidence(id, { kind: 'human-review', ok: false, summary: `Rejected: ${feedback || '(no reason)'}` });
+    void this.track(this.reviewer.killFor(id));
     if (!retry) return this.store.setStatus(id, 'blocked', {}, 'rejected');
     return this.store.setStatus(id, 'queued', { feedback: feedback || 'Rejected by reviewer', maxAttempts: Math.max(t.maxAttempts, t.attempts + 1) }, 'rejected, repair requested');
   }
@@ -200,6 +208,8 @@ export class Orchestrator {
     let t = this.store.getTask(id);
     const gate = t.artifacts.gate as { passed?: boolean } | undefined;
     if (!['review', 'blocked'].includes(t.status) || !gate?.passed) throw new Conflict('only tasks with passed gates (review, or blocked after a failed merge) can be merged');
+    const blocker = this.reviewer.mergeBlocker(t);
+    if (blocker) throw new Conflict(blocker);
     const p = this.store.getProject(t.projectId);
     t = this.store.setStatus(id, 'accepted', {}, 'approved by user');
     this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: 'Approved by user' });
@@ -421,7 +431,10 @@ export class Orchestrator {
         if (r.code !== 0) return fail(`verification failed: ${cmd} (exit ${r.code})`);
       }
       this.store.patchTask(id, { feedback: null, artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: true, at: new Date().toISOString() } } });
-      this.store.addEvidence(id, { kind: 'gate', ok: true, summary: 'All gates passed — waiting for human Approve & Merge' });
+      const mode = p.reviewPolicy.mode;
+      this.store.addEvidence(id, { kind: 'gate', ok: true, summary: mode === 'off' ? 'All gates passed — waiting for human Approve & Merge'
+        : `All gates passed — AI review (${mode}) next, then human Approve & Merge` });
+      await this.reviewer.autoStart(id);
     } catch (e) {
       fail(`gate error: ${(e as Error).message}`, false);
     }

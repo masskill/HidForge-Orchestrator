@@ -1,14 +1,13 @@
 // LLM planner: project goal -> draft task DAG, produced by a read-only agent session.
 // The result is only a proposal: the user reviews it, then "apply" creates draft tasks.
 import path from 'node:path';
-import { createInterface } from 'node:readline';
 import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, Conflict, type PlanDoc, type PlanRun, type PlanTask, type Project, type Task } from './store.ts';
 import { topoOrder } from './dag.ts';
 import { ROLES, commandDecision } from './contract.ts';
-import { DEFAULT_ROUTING } from './adapters/index.ts';
-import type { AgentAdapter, AgentEvent, Invocation } from './adapters/types.ts';
-import { spawnSafe, killTree, isAlive, maskSecrets } from './proc.ts';
+import type { AgentAdapter } from './adapters/types.ts';
+import { killTree, isAlive, maskSecrets } from './proc.ts';
+import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
 import { git } from './workspace.ts';
 
 export const PLAN_HEADER = '# Planning request — HidForge';
@@ -64,15 +63,6 @@ Reply with ONLY one JSON object inside a \`\`\`json fenced block, exactly this s
 }
 
 type Parsed = { ok: true; plan: PlanDoc } | { ok: false; error: string };
-
-function extractJson(text: string): unknown {
-  const fences = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((m) => m[1]!);
-  for (const f of fences.reverse()) { try { return JSON.parse(f); } catch { /* next */ } }
-  const a = text.indexOf('{');
-  const b = text.lastIndexOf('}');
-  if (a >= 0 && b > a) return JSON.parse(text.slice(a, b + 1));
-  throw new Error('no JSON object found');
-}
 
 const badPattern = (p: string) => !p.trim() || p.startsWith('/') || p.startsWith('\\') || /^[a-zA-Z]:/.test(p) || p.replace(/\\/g, '/').split('/').includes('..');
 const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => String(x).trim()) : []);
@@ -130,41 +120,6 @@ export function validatePlan(raw: unknown, existingIds: Set<number>, maxTasks: n
   return { ok: true, plan: { summary: String(o.summary ?? '').slice(0, 4000), risks: strArr(o.risks).slice(0, 20), tasks } };
 }
 
-// ---------------------------------------------------------------- one-shot agent session
-interface OneShot { pid: number | undefined; done: Promise<{ code: number | null; result: AgentEvent | null; messages: string[]; killReason: string | null }>; kill(reason: string): Promise<void> }
-
-// ponytail: task runs in orchestrator.ts have their own supervision (locks, recovery); merge the two runners if a 3rd caller appears.
-function runOnce(adapter: AgentAdapter, inv: Invocation, cwd: string, o: { timeoutMs: number; stallMs: number; onEvent: (e: AgentEvent, stream: string) => void }): OneShot {
-  const child = spawnSafe(inv.command, inv.args, { cwd });
-  let result: AgentEvent | null = null;
-  let killReason: string | null = null;
-  const messages: string[] = [];
-  let last = Date.now();
-  const started = Date.now();
-  const kill = async (reason: string) => { killReason ??= reason; if (child.pid) await killTree(child.pid); };
-  const timer = setInterval(() => {
-    if (Date.now() - started > o.timeoutMs) void kill(`timeout: exceeded ${Math.round(o.timeoutMs / 1000)}s`);
-    else if (Date.now() - last > o.stallMs) void kill(`stalled: no output for ${Math.round(o.stallMs / 1000)}s`);
-  }, 250);
-  const onLine = (stream: string) => (line: string) => {
-    last = Date.now();
-    const ev = stream === 'stdout' ? adapter.parseLine(line) : (line.trim() ? { kind: 'log' as const, text: line } : null);
-    if (!ev) return;
-    if (ev.kind === 'result') result = ev;
-    if (ev.kind === 'message') messages.push(ev.text);
-    o.onEvent(ev, stream);
-  };
-  createInterface({ input: child.stdout! }).on('line', onLine('stdout'));
-  createInterface({ input: child.stderr! }).on('line', onLine('stderr'));
-  child.stdin?.on('error', () => {});
-  child.stdin?.end(inv.stdin ?? '');
-  const done = new Promise<{ code: number | null; result: AgentEvent | null; messages: string[]; killReason: string | null }>((resolve) => {
-    child.on('error', (e) => { onLine('stderr')(`process error: ${e.message}`); });
-    child.on('close', (code) => { clearInterval(timer); resolve({ code, result, messages, killReason }); });
-  });
-  return { pid: child.pid, done, kill };
-}
-
 export class Planner {
   private readonly orch: Orchestrator;
   private readonly live = new Map<number, OneShot>();
@@ -173,20 +128,11 @@ export class Planner {
 
   /** Start a read-only planning session for the project goal. Returns immediately; progress is streamed as events. */
   async start(projectId: number, o: { provider?: string; model?: string | null; maxTasks?: number; timeoutSec?: number } = {}): Promise<PlanRun> {
-    const { store, registry } = this.orch;
+    const { store } = this.orch;
     const p = store.getProject(projectId);
     if (!p.goal.trim()) throw new BadRequest('set the project goal first');
     const maxTasks = Math.max(1, Math.min(30, Number(o.maxTasks ?? 12)));
-    let provider = o.provider ?? 'auto';
-    if (provider === 'auto') {
-      const picked = await registry.pick(this.orch.routingPolicy, store.getSetting('routingTable', DEFAULT_ROUTING));
-      if (!picked) throw new BadRequest(`no available agent for routing policy '${this.orch.routingPolicy}'`);
-      provider = picked;
-    }
-    const adapter = registry.get(provider);
-    const st = (await registry.status()).find((s) => s.id === provider);
-    if (!adapter || !st?.available) throw new BadRequest(`agent '${provider}' unavailable: ${st?.reason ?? 'unknown provider'}`);
-    if (!adapter.mock && adapter.capabilities().readOnlyMode !== 'supported') throw new BadRequest(`agent '${provider}' has no read-only mode; it cannot be used as planner`);
+    const { adapter, provider } = await resolveReadOnlyAgent(this.orch, o.provider ?? 'auto', 'planner');
 
     const plan = store.createPlan({ projectId, provider, model: o.model ?? null, goal: p.goal });
     store.event({ projectId, type: 'plan.started', data: { planId: plan.id, provider, model: o.model ?? null, mock: adapter.mock } });

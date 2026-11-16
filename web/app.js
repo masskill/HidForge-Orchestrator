@@ -39,6 +39,21 @@ const go = (hash) => { if (location.hash === hash) render(); else location.hash 
 const agentState = (a) => (!a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
   : a.auth === 'unknown' ? ['авторизація невідома', 'warning'] : ['готовий', 'success']);
 const providerLabel = (t) => (t.provider === 'mock' ? h('span', { class: 'mockflag' }, 'MOCK') : t.provider);
+const REVIEW_VERDICT = { approve: ['схвалено', 'success'], request_changes: ['потрібні зміни', 'warning'], reject: ['відхилено', 'danger'] };
+const REVIEW_STATUS = { running: ['рецензує…', 'info'], failed: ['збій рецензії', 'danger'], canceled: ['рецензію зупинено', 'neutral'] };
+const SEVERITY = { critical: ['критично', 'danger'], major: ['важливо', 'warning'], minor: ['дрібниця', 'info'], info: ['примітка', 'neutral'] };
+const reviewBadge = (rv) => { const [l, tone] = (rv.status === 'succeeded' ? REVIEW_VERDICT[rv.verdict] : REVIEW_STATUS[rv.status]) ?? [rv.status, 'neutral']; return Badge(l, tone, { live: rv.status === 'running' }); };
+/** Mirrors Reviewer.mergeBlocker on the server (required mode). */
+function reviewBlocker(t) {
+  if (state.project?.reviewPolicy?.mode !== 'required') return null;
+  const rv = t.artifacts.aiReview;
+  if (!rv) return 'Проєкт вимагає AI-рецензію — запустіть її';
+  if (rv.attempt !== t.attempts) return 'Рецензія стосується попередньої спроби — запустіть її знову';
+  if (rv.status === 'running') return 'AI-рецензія ще триває';
+  if (rv.status !== 'succeeded') return 'AI-рецензія не вдалася — запустіть її знову або змініть політику проєкту';
+  if (rv.verdict !== 'approve') return `AI-рецензент: ${REVIEW_VERDICT[rv.verdict]?.[0] ?? rv.verdict}`;
+  return null;
+}
 const clean = (...n) => n.flat().filter((x) => x != null && x !== false); // replaceChildren() would print "null"
 const mount = (...n) => $('#page').replaceChildren(...clean(n));
 const count = (statuses) => state.tasks.filter((t) => statuses.includes(t.status)).length;
@@ -270,7 +285,11 @@ async function renderDetail() {
   const gate = t.artifacts.gate;
   const primary = [];
   if (t.status === 'draft') primary.push(PrimaryButton({ icon: 'play', onClick: act(() => taskAction(t.id, 'submit')) }, 'Запустити'));
-  if (gate?.passed && ['review', 'blocked'].includes(t.status)) primary.push(PrimaryButton({ icon: 'merge', onClick: act(() => taskAction(t.id, 'approve')) }, 'Approve & Merge'));
+  const rv = t.artifacts.aiReview;
+  const blocker = reviewBlocker(t);
+  if (gate?.passed && ['review', 'blocked'].includes(t.status)) primary.push(PrimaryButton({ icon: 'merge', disabled: Boolean(blocker), title: blocker || null, onClick: act(() => taskAction(t.id, 'approve')) }, 'Approve & Merge'));
+  if (rv?.status === 'running') primary.push(SecondaryButton({ icon: 'stop', onClick: act(() => taskAction(t.id, 'review/cancel')) }, 'Зупинити рецензію'));
+  else if (gate?.passed && t.status === 'review') primary.push(SecondaryButton({ icon: 'check', onClick: act(() => taskAction(t.id, 'review')) }, rv ? 'Рецензувати знову' : 'AI-рецензія'));
   if (ATTENTION.includes(t.status)) primary.push(SecondaryButton({ onClick: act(async () => {
     const fb = await promptModal('Що виправити? Агент отримає це в repair-спробі.', { title: `Reject #${t.id}`, ok: 'Відхилити й повторити' }); if (fb === null) return;
     await taskAction(t.id, 'reject', { feedback: fb, retry: true });
@@ -299,11 +318,14 @@ async function renderDetail() {
         DangerButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: false })) }, 'Заборонити'))) : null,
     primary.length ? h('div', { class: 'row' }, ...primary) : null,
     gate ? h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Gate'), Badge(gate.passed ? 'пройдено' : 'не пройдено', gate.passed ? 'success' : 'danger'), gate.reason ? h('span', { class: 'text-2 wrap' }, gate.reason) : null) : null,
+    rv ? h('div', { class: 'row' }, h('span', { class: 'muted' }, 'AI-рецензія'), reviewBadge(rv), rv.attempt !== t.attempts ? Badge(`спроба ${rv.attempt}`, 'neutral', { plain: true }) : null) : null,
+    blocker && gate?.passed && ['review', 'blocked'].includes(t.status) ? h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, h('span', { class: 'muted' }, 'Merge заблоковано: '), blocker) : null,
     t.feedback && t.status !== 'merged' ? h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, h('span', { class: 'muted' }, 'Остання причина: '), t.feedback) : null,
     Tabs([
       { id: 'log', label: 'Журнал', content: log },
       { id: 'evidence', label: 'Докази', count: t.evidence.length, content: t.evidence.length ? h('ul', { class: 'evidence' }, ...t.evidence.slice().reverse().map((e) => h('li', { class: e.ok ? 'ok' : 'bad', title: e.detail || '' },
         h('span', { class: 'muted mono' }, `${e.ts.slice(11, 19)} ${e.kind}: `), e.summary))) : h('p', { class: 'muted' }, 'Доказів ще немає') },
+      { id: 'review', label: 'AI-рецензія', count: rv?.findings?.length || null, content: reviewPanel(t, rv) },
       { id: 'diff', label: 'Зміни', content: [h('div', {}, GhostButton({ size: 'sm', icon: 'refresh', onClick: loadDiff }, 'Оновити diff')), diffBox] },
       { id: 'runs', label: 'Запуски', count: runs.length, content: runs.length ? h('ul', { class: 'evidence' }, ...runs.map((r) => h('li', {},
         h('div', { class: 'row between' }, h('span', {}, h('span', { class: 'id' }, `#${r.attempt}`), ` ${r.provider}`, r.isMock ? h('span', { class: 'mockflag' }, ' MOCK') : null), h('span', { class: 'muted mono' }, `${r.startedAt.slice(11, 19)}${r.endedAt ? '–' + r.endedAt.slice(11, 19) : ''}`)),
@@ -327,12 +349,41 @@ function appendLog(e) {
   const ts = e.ts.slice(11, 19);
   let line;
   if (e.type === 'run.output') line = h('div', { class: `k-${e.data.kind} ${e.data.stream}` }, `${ts} ${e.data.text}`);
+  else if (e.type === 'review.output') line = h('div', { class: `k-${e.data.kind} ${e.data.stream}` }, `${ts} [рецензент] ${e.data.text}`);
+  else if (e.type === 'review.started') line = h('div', { class: 'sys' }, `${ts} ── AI-рецензія спроби #${e.data.attempt}: ${e.data.mock ? '[MOCK] ' : ''}${e.data.provider}${e.data.model ? ' ' + e.data.model : ''}`);
+  else if (e.type === 'review.status') line = h('div', { class: 'sys' }, `${ts} ── AI-рецензія: ${e.data.status}${e.data.verdict ? ` → ${e.data.verdict}` : ''}`);
   else if (e.type === 'task.status') line = h('div', { class: 'sys' }, `${ts} ── ${e.data.from} → ${e.data.to}${e.data.note ? ` (${e.data.note})` : ''}`);
   else if (e.type === 'run.started') line = h('div', { class: 'sys' }, `${ts} ── запуск #${e.data.attempt}: ${e.data.mock ? '[MOCK] ' : ''}${e.data.command.split(/[\\/]/).pop()} ${e.data.args.join(' ')}`);
   else line = h('div', { class: 'sys' }, `${ts} ${e.type} ${JSON.stringify(e.data)}`);
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.append(line);
   if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function reviewPanel(t, rv) {
+  const mode = state.project?.reviewPolicy?.mode ?? 'off';
+  if (!rv) {
+    return EmptyState({ icon: 'check', title: 'Рецензії ще не було',
+      text: mode === 'off' ? 'AI-рецензент вимкнений для проєкту (Налаштування → AI-рецензент). Запустити вручну можна після успішних gate-ів.'
+        : 'Рецензент (QA + Security) запуститься автоматично після успішних gate-ів.' });
+  }
+  const order = Object.keys(SEVERITY);
+  const findings = (rv.findings || []).slice().sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+  return h('div', { class: 'stack' },
+    InfoList([
+      ['Вердикт', reviewBadge(rv)],
+      ['Рецензент', h('span', {}, rv.provider === 'mock' ? h('span', { class: 'mockflag' }, 'MOCK') : rv.provider, rv.model ? h('span', { class: 'muted' }, ` ${rv.model}`) : '')],
+      ['Спроба', h('span', {}, h('span', { class: 'id' }, `#${rv.attempt}`), rv.attempt !== t.attempts ? h('span', { class: 'muted' }, ` (поточна #${t.attempts})`) : '')],
+      ['Режим проєкту', { off: 'вимкнено', advisory: 'дорадчий', required: 'обов\'язковий' }[mode] ?? mode],
+      rv.summary ? ['Підсумок', h('div', { style: 'white-space:pre-wrap' }, rv.summary)] : null,
+      rv.error ? ['Помилка', h('div', { class: 'wrap' }, rv.error)] : null,
+      rv.usage ? ['Usage', h('span', { class: 'mono muted' }, JSON.stringify(rv.usage))] : null,
+    ].filter(Boolean)),
+    findings.length ? h('ul', { class: 'evidence' }, ...findings.map((f) => h('li', { class: ['critical', 'major'].includes(f.severity) ? 'bad' : '' },
+      h('div', { class: 'row' }, Badge(SEVERITY[f.severity]?.[0] ?? f.severity, SEVERITY[f.severity]?.[1] ?? 'neutral'),
+        f.file ? h('code', {}, `${f.file}${f.line ? ':' + f.line : ''}`) : ''),
+      h('div', { class: 'wrap', style: 'margin-top:var(--s-1)' }, f.message))))
+      : h('p', { class: 'muted' }, rv.status === 'succeeded' ? 'Зауважень немає' : rv.status === 'running' ? 'Рецензент працює — вивід у вкладці «Журнал».' : ''));
 }
 
 function renderDiff(text) {
@@ -469,6 +520,7 @@ function settingsPage() {
         Field('Паралельних агентів', maxConc, 'Скільки задач можуть виконуватися одночасно'),
         Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
       PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
+    p ? reviewSettings(p) : null,
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
       cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
@@ -476,6 +528,21 @@ function settingsPage() {
         await reloadProject(); toast('Збережено', 'success'); render();
       }) }, 'Зберегти'))) : null,
   );
+}
+function reviewSettings(p) {
+  const pol = p.reviewPolicy || { mode: 'off', provider: 'auto', model: null };
+  const reviewers = (state.agents || []).filter((a) => a.mock || a.capabilities.readOnlyMode === 'supported');
+  const mode = Select([['off', 'Вимкнено'], ['advisory', 'Дорадчий — лише показує вердикт'], ['required', 'Обов\'язковий — merge лише після «схвалено»']], pol.mode);
+  const prov = Select([['auto', 'auto (за політикою)'], ...reviewers.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : `${a.name}${a.available ? '' : ' (недоступний)'}`])], pol.provider);
+  const model = TextInput({ value: pol.model ?? '', placeholder: 'за замовчуванням' });
+  return PanelCard({ title: 'AI-рецензент', subtitle: `QA + Security · проєкт «${p.name}»` },
+    h('p', { class: 'text-2', style: 'margin:0' }, 'Після успішних gate-ів окремий агент у режимі лише читання перевіряє diff задачі. В обов\'язковому режимі «потрібні зміни» автоматично повертає задачу агенту із зауваженнями, а Approve & Merge доступний лише після вердикту «схвалено». Остаточне рішення завжди за вами.'),
+    h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' },
+      Field('Режим', mode), Field('Агент-рецензент', prov, state.agents ? null : 'перевірка агентів…'), Field('Модель', model)),
+    h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
+      await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: model.value.trim() || null } });
+      await reloadProject(); toast('Політику рецензії збережено', 'success'); render();
+    }) }, 'Зберегти')));
 }
 function applyTheme() {
   let t = ls.get('hf-theme') || 'dark';
@@ -494,7 +561,7 @@ function connectStream() {
     const e = JSON.parse(m.data);
     if (e.taskId === state.taskId && state.editing == null) appendLog(e);
     if (e.type === 'plan.output') { appendPlanLog(e); return; }
-    if (e.type === 'run.output') return;
+    if (e.type === 'run.output' || e.type === 'review.output') return;
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
       if (state.editing != null || document.querySelector('dialog[open]')) return; // never wipe a form or modal in progress
