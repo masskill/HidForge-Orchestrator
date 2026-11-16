@@ -8,6 +8,7 @@
 | Реальний `claude -p … --max-budget-usd 0.2 --model haiku` | ✅ прапорець прийнято, `total_cost_usd` = 0.09 |
 | Реальні списки моделей | ✅ agy — 18, Cursor — 280, Claude — 3 аліаси; Codex не має команди списку |
 | Cursor Agent CLI 2026.11.05 | ✅ знайдено без PowerShell (`versions\<latest>\node.exe index.js`), авторизація `status` = logged in; ⛔ headless-прогін вимагає довіри до каталогу — без вашого дозволу не запускався |
+| Codex 0.153.4, модель `gpt-5.6-luna` (явно; модель з `~/.codex/config.toml` відсутня в каталозі акаунта) | ✅ `codex exec` відповідає; ✅ рецензент: 22 с, вердикт `reject` за `eval` (`node scripts\smoke-review.ts codex:gpt-5.6-luna`); ⛔ задача на запис: `Failed to write file` у Windows-sandbox Codex навіть для ASCII-шляху поза %TEMP% — sandbox не послаблюємо |
 | UI: стат «Витрати», таблиця витрат за агентами, бюджет проєкту, ліміт задачі, підказки моделей, перемикач довіри Cursor | ✅ вбудований браузер, без помилок у консолі |
 
 ## v0.3 — AI-рецензент QA + Security (2026-11-16)
