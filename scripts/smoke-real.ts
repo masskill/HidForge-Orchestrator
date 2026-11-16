@@ -11,6 +11,9 @@ if (!providers.length) { console.error('usage: node scripts/smoke-real.ts <provi
 const root = mkdtempSync(path.join(os.tmpdir(), 'HidForge smoke ї-'));
 const repo = await makeRepo(root);
 const orch = new Orchestrator({ dataDir: path.join(root, 'data'), tickMs: 200, backoffMs: 0, stallTimeoutSec: 120, maxConcurrent: 3 });
+// SMOKE_TRUST=cursor — the user's explicit opt-in to Cursor workspace trust for this throw-away repo only.
+const trust = (process.env.SMOKE_TRUST ?? '').split(',').filter(Boolean);
+if (trust.length) orch.store.setSetting('agentTrust', Object.fromEntries(trust.map((t) => [t, true])));
 await orch.start();
 const p = await orch.addProject(repo, 'Smoke test of real CLI adapters');
 const st = await orch.registry.status();

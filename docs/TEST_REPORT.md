@@ -1,5 +1,14 @@
 # Звіт про перевірку
 
+## Реальні прогони з вашими дозволами (2026-11-16)
+
+| Перевірка | Результат |
+|---|---|
+| Cursor Agent CLI 2026.11.05 з довірою до worktree (`SMOKE_TRUST=cursor node scripts/smoke-real.ts cursor`) | ✅ задача `review`, запуск `succeeded`, exit 0; файл `hello from cursor`, gate пройдено, usage з токенами; `--force`/`--yolo` не передавались. Довіру ввімкнено й у налаштуваннях застосунку |
+| Встановлення `@google/gemini-cli@0.68.0`, `opencode-ai@1.19.5` (npm, глобально) | ✅ обидва запускаються, діагностика HidForge — «готовий» |
+| Gemini CLI, OpenCode: реальна задача | ⚪ не запускалась: вхід у Gemini не виконано (немає OAuth), в OpenCode 0 облікових даних; у середовищі є `AI_GATEWAY_API_KEY` (платний Vercel AI Gateway) — без вашого вибору провайдера/моделі не запускаю, щоб не створити платних викликів |
+| VPS `ozon-srv` (`~/.ssh/config_ozon`) | ⚪ `ssh -o BatchMode=yes` → `Connection timed out` на порту сервера: недоступний з цього комп'ютера. Аліас лежить в окремому файлі, тож для HidForge потрібен `Include config_ozon` у `~/.ssh/config` |
+
 ## Сторінки «Проєкти» і «Журнал подій» (2026-11-16)
 
 Код сторінок — патч GPT за промптом `docs/prompts/gpt-projects-activity-pages.md`, переглянутий і застосований.
