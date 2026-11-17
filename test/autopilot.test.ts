@@ -1,0 +1,97 @@
+// Owner automation: auto-merge after an approving AI review, owner questions, auto-fix of stuck tasks, pause / stop.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { setup, mock, waitFor, waitStatus } from './helpers.ts';
+import { normalizeReviewPolicy } from '../src/reviewer.ts';
+import { parseAdvice, ownerQuestions } from '../src/doctor.ts';
+
+const policy = (o: object) => normalizeReviewPolicy({ provider: 'mock', ...o }, () => true);
+
+test('auto-merge: gates pass, the AI review approves, the task merges by itself; auto-merge implies a required review', async () => {
+  assert.equal(policy({ mode: 'off', autoMerge: true }).mode, 'required');
+  assert.equal(policy({ mode: 'off' }).autoMerge, false);
+  const { orch, project } = await setup();
+  try {
+    orch.store.updateProject(project.id, { reviewPolicy: policy({ mode: 'off', autoMerge: true }) });
+    const t = orch.createTask(project.id, { title: 'am', provider: 'mock', allowedPaths: ['a/**'], description: mock({ write: { 'a/a.txt': 'A' } }) });
+    orch.submit(t.id);
+    const done = await waitStatus(orch, t.id, ['merged', 'blocked', 'failed']);
+    assert.equal(done.status, 'merged');
+    assert.ok(done.evidence.some((e) => e.summary.startsWith('Approved automatically')));
+  } finally { await orch.stop(); }
+});
+
+test('owner question: an agent that must ask stops the task at once; the answer goes into the task and it runs again', async () => {
+  assert.deepEqual(ownerQuestions(['done', '**OWNER QUESTION:** Чи погоджуєте план?\nOWNER QUESTION: Який порт?', null]), ['Чи погоджуєте план?', 'Який порт?']);
+  const { orch, project } = await setup();
+  try {
+    const t = orch.createTask(project.id, { title: 'ask', provider: 'mock', allowedPaths: ['q/**'], description: mock({ ask: 'Чи погоджуєте план?', write: { 'q/q.txt': 'Q' } }) });
+    orch.submit(t.id);
+    const b = await waitStatus(orch, t.id, ['blocked', 'failed', 'review']);
+    assert.equal(b.status, 'blocked');
+    assert.equal(b.attempts, 1, 'no retries wasted on a question');
+    assert.equal(b.question, 'Чи погоджуєте план?');
+    assert.throws(() => orch.answerOwner(t.id, '  '), /empty/);
+    orch.answerOwner(t.id, 'Так, роби');
+    const r = await waitStatus(orch, t.id, ['review', 'blocked', 'failed']);
+    assert.equal(r.status, 'review');
+    assert.match(r.description, /Owner's answer[\s\S]*Answer: Так, роби/);
+    assert.equal(r.question, null);
+  } finally { await orch.stop(); }
+});
+
+test('auto-fix: a failed task is diagnosed and retried; "ask the owner" turns into a question; off by default', async () => {
+  assert.throws(() => parseAdvice({ action: 'ask_owner', explanation: 'x' }), /question/);
+  assert.equal(parseAdvice({ action: 'retry', explanation: 'x', changes: { allowedPaths: ['../etc/**'] } }).changes.allowedPaths, undefined, 'no path escapes');
+  const { orch, project } = await setup();
+  try {
+    const off = orch.createTask(project.id, { title: 'off', provider: 'mock', maxAttempts: 1, allowedPaths: ['o/**'], description: mock({ failAttempts: 1, write: { 'o/o.txt': 'O' } }) });
+    orch.submit(off.id);
+    await waitStatus(orch, off.id, ['failed']);
+    assert.equal(orch.store.getTask(off.id).artifacts.doctor, undefined, 'auto-fix is off by default');
+
+    orch.store.updateProject(project.id, { reviewPolicy: policy({ mode: 'off', autoFix: true }) });
+    const t = orch.createTask(project.id, { title: 'fix', provider: 'mock', maxAttempts: 1, allowedPaths: ['f/**'], description: mock({ failAttempts: 1, write: { 'f/f.txt': 'F' } }) });
+    orch.submit(t.id);
+    const fixed = await waitStatus(orch, t.id, ['review'], 30_000);
+    assert.equal((fixed.artifacts.doctor as { action: string }).action, 'retry');
+    assert.equal(fixed.artifacts.autoFixes, 1);
+    assert.ok(fixed.evidence.some((e) => e.kind === 'doctor' && e.ok));
+
+    const q = orch.createTask(project.id, { title: 'q', provider: 'mock', maxAttempts: 1, allowedPaths: ['g/**'],
+      description: mock({ failAttempts: 9, doctor: { action: 'ask_owner', explanation: 'Потрібен ключ доступу.', question: 'Де взяти ключ?' } }) });
+    orch.submit(q.id);
+    const asked = await waitFor(() => { const x = orch.store.getTask(q.id); return x.question ? x : null; }, 20_000, 'doctor question');
+    assert.equal(asked.status, 'failed');
+    assert.equal(asked.question, 'Де взяти ключ?');
+    assert.equal((asked.artifacts.doctor as { explanation: string }).explanation, 'Потрібен ключ доступу.');
+  } finally { await orch.stop(); }
+});
+
+test('pause / stop: a paused project starts nothing; stop interrupts without counting the attempt; task pause parks a draft', async () => {
+  const { orch, project } = await setup();
+  try {
+    const slow = (dir: string) => mock({ sleepMs: 4000, steps: 8, write: { [`${dir}/x.txt`]: 'X' } });
+    const t = orch.createTask(project.id, { title: 'stop', provider: 'mock', allowedPaths: ['s/**'], description: slow('s') });
+    orch.submit(t.id);
+    await waitStatus(orch, t.id, ['running']);
+    assert.deepEqual(await orch.pauseProject(project.id, true), { paused: true, stopped: 1 });
+    let s = orch.store.getTask(t.id);
+    assert.equal(s.status, 'queued');
+    assert.equal(s.attempts, 0, 'the stopped attempt is not counted');
+    assert.equal(orch.store.runsForTask(t.id)[0]!.status, 'canceled');
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(orch.store.getTask(t.id).status, 'queued', 'paused: nothing starts');
+    await orch.resumeProject(project.id);
+    s = await waitStatus(orch, t.id, ['review']);
+    assert.equal(s.attempts, 1);
+
+    const p2 = orch.createTask(project.id, { title: 'pause', provider: 'mock', allowedPaths: ['p/**'], description: slow('p') });
+    orch.submit(p2.id);
+    await waitStatus(orch, p2.id, ['running']);
+    assert.equal((await orch.pauseTask(p2.id)).status, 'draft');
+    assert.equal(orch.store.getTask(p2.id).attempts, 0);
+    orch.submit(p2.id);
+    assert.equal((await waitStatus(orch, p2.id, ['review'])).attempts, 1);
+  } finally { await orch.stop(); }
+});

@@ -47,6 +47,11 @@ review ─AI review (required): request_changes→ queued (repair із findings)
 review ─невідома команда перевірки→ needs_user_input ─дозволити→ review / ─заборонити→ blocked
 accepted ─конфлікт merge→ blocked ─Retry→ queued (база зливається у гілку задачі, агент розв'язує)
 будь-який активний ─Cancel→ canceled (kill дерева процесів)
+running/queued/ready ─Пауза задачі→ draft (спроба не зараховується, зроблене лишається у worktree)
+running ─Зупинити все (проєкт)→ queued + проєкт на паузі (спроба не зараховується)
+review ─без змін, агент лишив «OWNER QUESTION:»→ blocked з питанням ─відповідь власника→ queued
+blocked/failed ─автовиправлення (retry)→ queued   ─(ask_owner)→ питання власнику
+review ─AI review approve + autoMerge→ accepted → merged
 ```
 Переходи валідуються таблицею `TRANSITIONS` у `store.ts`.
 
@@ -136,6 +141,23 @@ gates OK ─▶ reviewPolicy.mode ≠ off ─▶ Reviewer.autoStart ─▶ git w
 - Наслідки застосовуються лише якщо задача ще в `review` на тій самій спробі; Cancel/Reject задачі вбиває рецензента.
 - Після рестарту активна рецензія → `failed` (процес убивається, тимчасові worktree прибираються), повтор — вручну.
 - API: `PATCH /api/projects/:id {reviewPolicy}`, `POST /api/tasks/:id/review`, `POST /api/tasks/:id/review/cancel`.
+
+## Автопілот: автоприйняття, автовиправлення, пауза (`src/doctor.ts`, `src/orchestrator.ts`)
+
+- `reviewPolicy.autoMerge`: після вердикту `approve` HidForge сам робить Approve & Merge (`approve(id, 'auto')`, доказ
+  «Approved automatically»). Вмикання автоприйняття вмикає обов'язкову рецензію. Рецензія, що не змогла відпрацювати,
+  повторюється один раз на спробу іншим агентом (`exclude` у `resolveReadOnlyAgent`).
+- `reviewPolicy.autoFix`: задача, що стала `blocked`/`failed` (не з рішення людини), отримує діагноз: read-only агент
+  (рецензент проєкту або ланцюжок planning/medium) читає задачу, докази й останні слова агентів і відповідає JSON
+  `{action: retry | ask_owner | give_up, explanation (укр., для не-програміста), question, feedback, changes}`.
+  `retry` — виправлені поля задачі + feedback, ще 2 спроби; `ask_owner` — питання власнику; не більше 2 діагнозів
+  на задачу, по одному за раз.
+- Контракт задачі просить агента не чекати погодження: якщо без власника не можна, нічого не змінювати й залишити
+  рядки `OWNER QUESTION: …`. Gate бачить це й одразу ставить питання власнику замість марних повторів.
+  Відповідь (`POST /api/tasks/:id/owner-answer`) дописується в опис задачі, і задача запускається знову.
+- Пауза: `POST /api/projects/:id/pause {stop?}` / `resume` (налаштування `pausedProjects`; планувальник пропускає
+  задачі проєкту), `POST /api/tasks/:id/pause` (у чернетки). Перерваний власником запуск — `canceled`, спроба не
+  зараховується.
 
 ## Розміщення даних
 `HIDFORGE_DATA_DIR` (за замовчуванням `%LOCALAPPDATA%\HidForge`): `hidforge.db`, `worktrees\p<project>\t<task>`, тимчасові `planning\` і `reviewing\`, `demo\`. Worktree-и лежать поза репозиторієм користувача; гілки — `hidforge/p<project>-t<task>`.

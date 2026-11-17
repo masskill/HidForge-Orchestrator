@@ -63,7 +63,7 @@ test('review prompt: read-only, no shell, injection warning, verify evidence, di
 
 test('review policy validation', () => {
   const known = (id: string) => id === 'mock';
-  assert.deepEqual(normalizeReviewPolicy({ mode: 'required', provider: 'mock' }, known), { mode: 'required', provider: 'mock', model: null });
+  assert.deepEqual(normalizeReviewPolicy({ mode: 'required', provider: 'mock' }, known), { mode: 'required', provider: 'mock', model: null, autoMerge: false, autoFix: false });
   assert.throws(() => normalizeReviewPolicy({ mode: 'sometimes' }, known), BadRequest);
   assert.throws(() => normalizeReviewPolicy({ mode: 'advisory', provider: 'nope' }, known), BadRequest);
 });

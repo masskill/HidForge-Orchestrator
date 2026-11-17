@@ -99,16 +99,18 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       }
       return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}), roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, ...orch.routingSettings(), apiFallback: s.getSetting('apiFallback', false) };
     }],
-    ['GET', /^\/api\/projects$/, () => s.listProjects()],
+    ['GET', /^\/api\/projects$/, () => s.listProjects().map((p) => ({ ...p, paused: orch.isPaused(p.id) }))],
+    ['POST', /^\/api\/projects\/(\d+)\/pause$/, (m, b) => orch.pauseProject(id(m), b.stop === true)],
+    ['POST', /^\/api\/projects\/(\d+)\/resume$/, (m) => orch.resumeProject(id(m))],
     ['POST', /^\/api\/projects$/, (_m, b) => orch.addProject(str(b.repoPath, 'repoPath'), String(b.goal ?? ''))],
     ['POST', /^\/api\/demo$/, () => createDemo(orch)],
-    ['GET', /^\/api\/projects\/(\d+)$/, (m) => ({ project: s.getProject(id(m)), tasks: s.listTasks(id(m)) })],
-    ['PATCH', /^\/api\/projects\/(\d+)$/, (m, b) => s.updateProject(id(m), {
+    ['GET', /^\/api\/projects\/(\d+)$/, (m) => ({ project: { ...s.getProject(id(m)), paused: orch.isPaused(id(m)) }, tasks: s.listTasks(id(m)) })],
+    ['PATCH', /^\/api\/projects\/(\d+)$/, (m, b) => { const p = s.updateProject(id(m), {
       goal: b.goal as string | undefined,
       allowedCommands: Array.isArray(b.allowedCommands) ? b.allowedCommands.map(String) : undefined,
       reviewPolicy: b.reviewPolicy === undefined ? undefined : normalizeReviewPolicy(b.reviewPolicy, (p) => Boolean(orch.registry.get(p))),
       budgetUsd: b.budgetUsd === undefined ? undefined : budget(b.budgetUsd),
-    })],
+    }); if (b.reviewPolicy !== undefined) void orch.track(orch.autopilot(p.id)); return p; }],
     ['DELETE', /^\/api\/projects\/(\d+)$/, (m) => orch.deleteProject(id(m))],
     ['GET', /^\/api\/projects\/(\d+)\/plan-progress$/, (m) => projectPlan(orch, id(m))],
     ['GET', /^\/api\/projects\/(\d+)\/costs$/, (m) => projectCosts(s, id(m))],
@@ -123,6 +125,9 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     ['DELETE', /^\/api\/tasks\/(\d+)$/, (m) => { s.deleteTask(id(m)); return { ok: true }; }],
     ['POST', /^\/api\/tasks\/(\d+)\/submit$/, (m) => orch.submit(id(m))],
     ['POST', /^\/api\/tasks\/(\d+)\/cancel$/, (m) => orch.cancel(id(m))],
+    ['POST', /^\/api\/tasks\/(\d+)\/pause$/, (m) => orch.pauseTask(id(m))],
+    ['POST', /^\/api\/tasks\/(\d+)\/owner-answer$/, (m, b) => orch.answerOwner(id(m), b.text)],
+    ['POST', /^\/api\/tasks\/(\d+)\/autofix$/, (m) => orch.doctor.start(id(m))],
     ['POST', /^\/api\/tasks\/(\d+)\/retry$/, (m) => orch.retry(id(m))],
     ['POST', /^\/api\/tasks\/(\d+)\/approve$/, (m) => orch.approve(id(m))],
     ['POST', /^\/api\/tasks\/(\d+)\/reject$/, (m, b) => orch.reject(id(m), String(b.feedback ?? ''), b.retry !== false)],

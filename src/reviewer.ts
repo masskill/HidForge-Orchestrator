@@ -36,7 +36,9 @@ export function normalizeReviewPolicy(raw: unknown, knownProvider: (id: string) 
   const provider = String(o.provider ?? 'auto');
   if (provider !== 'auto' && !knownProvider(provider)) throw new BadRequest(`unknown reviewer provider ${provider}`);
   const model = cleanModel(o.model);
-  return { mode: mode as ReviewPolicy['mode'], provider, model };
+  const autoMerge = o.autoMerge === true;
+  // auto-merge needs a review verdict to act on
+  return { mode: (autoMerge && mode === 'off' ? 'required' : mode) as ReviewPolicy['mode'], provider, model, autoMerge, autoFix: o.autoFix === true };
 }
 
 export function buildReviewPrompt(task: Task, project: Project, attempt: number, diff: string, files: string[]): string {
@@ -170,10 +172,10 @@ export class Reviewer {
   isRunning(taskId: number): boolean { return this.active.has(taskId); }
 
   /** Called by the orchestrator when gates pass. Never throws: an unavailable reviewer is recorded as a failed review. */
-  async autoStart(taskId: number): Promise<void> {
+  async autoStart(taskId: number, o: { exclude?: string } = {}): Promise<void> {
     const t = this.orch.store.getTask(taskId);
     if (this.orch.store.getProject(t.projectId).reviewPolicy.mode === 'off') return;
-    try { await this.start(taskId); }
+    try { await this.start(taskId, o); }
     catch (e) {
       if (this.abandoned) return;
       const p = this.orch.store.getProject(t.projectId).reviewPolicy;
@@ -183,7 +185,7 @@ export class Reviewer {
   }
 
   /** Start (or re-run) a review of the task's current attempt. Returns immediately; output is streamed as review.output events. */
-  async start(taskId: number, o: { provider?: string; model?: string | null } = {}): Promise<Task> {
+  async start(taskId: number, o: { provider?: string; model?: string | null; exclude?: string } = {}): Promise<Task> {
     const { store } = this.orch;
     let t = store.getTask(taskId);
     if (t.status !== 'review' || !(t.artifacts.gate as { passed?: boolean } | undefined)?.passed) throw new Conflict('only a task in review with passed gates can be reviewed');
@@ -203,7 +205,7 @@ export class Reviewer {
         const available = new Set((await this.orch.registry.status()).filter((a) => a.available).map((a) => a.id));
         links = links.filter((l) => usable(l, { available, write: false, ceiling: rs.effortCeiling as Effort }));
       }
-      const { adapter, provider, model: linkModel, effort } = await resolveReadOnlyAgent(this.orch, want, 'reviewer', { links, avoidVendor: authorVendor });
+      const { adapter, provider, model: linkModel, effort } = await resolveReadOnlyAgent(this.orch, want, 'reviewer', { links, avoidVendor: authorVendor, exclude: o.exclude });
       const model = o.model !== undefined ? cleanModel(o.model) : (want === 'auto' && linkModel ? linkModel : pol.model);
       t = store.getTask(taskId);
       if (t.status !== 'review') throw new Conflict(`task is ${t.status}`);
@@ -280,7 +282,15 @@ export class Reviewer {
       detail: detail ?? undefined,
     });
     t = store.getTask(taskId);
-    const mode = store.getProject(t.projectId).reviewPolicy.mode;
+    const pol = store.getProject(t.projectId).reviewPolicy;
+    const mode = pol.mode;
+    // auto-merge: a review that failed to run (agent error, limit) is re-run once per attempt — with the limit pause, by another agent
+    if (pol.autoMerge && r.status === 'failed' && t.status === 'review' && t.attempts === r.attempt && t.artifacts.reviewRetried !== r.attempt) {
+      store.patchTask(taskId, { artifacts: { ...t.artifacts, reviewRetried: r.attempt } });
+      // another agent than the one that failed (a broken CLI would fail again)
+      setImmediate(() => void this.orch.track(this.autoStart(taskId, pol.provider === 'auto' ? { exclude: r.provider } : {})));
+      return;
+    }
     if (mode !== 'required' || r.status !== 'succeeded' || t.status !== 'review' || t.attempts !== r.attempt) return;
     const doc = r as ReviewDoc & AiReview;
     if (doc.verdict === 'request_changes') {
@@ -289,6 +299,8 @@ export class Reviewer {
       else store.setStatus(taskId, 'blocked', { feedback }, 'AI review requested changes; attempts exhausted');
     } else if (doc.verdict === 'reject') {
       store.setStatus(taskId, 'blocked', { feedback: findingsToFeedback(doc) }, 'AI review rejected the change');
+    } else if (doc.verdict === 'approve' && pol.autoMerge) {
+      void this.orch.approve(taskId, 'auto').catch((e: Error) => store.addEvidence(taskId, { kind: 'merge', ok: false, summary: `Auto-merge failed: ${e.message}` }));
     }
   }
 

@@ -15,6 +15,8 @@ interface Directive {
   plan?: unknown; planRaw?: string; // planner-mode overrides
   // reviewer-mode overrides: verdict object or verdict name; request changes while attempt <= reviewAttempts
   review?: unknown; reviewRaw?: string; reviewAttempts?: number; reviewHang?: boolean; reviewWrite?: Record<string, string>;
+  doctor?: unknown; // auto-fix mode: the advice JSON (default: retry)
+  ask?: string; askAttempts?: number; // write nothing and end with "OWNER QUESTION: <ask>" while attempt <= askAttempts (default 1)
 }
 
 const NL = '\n';
@@ -56,6 +58,11 @@ async function main() {
   const planning = input.startsWith('# Planning request');
   const attempt = Number(/Attempt:\s*(\d+)/.exec(input)?.[1] ?? 1);
   if (input.startsWith('# Code review request')) return review(d, attempt);
+  if (input.startsWith('# Task diagnosis request')) {
+    const advice = d.doctor ?? { action: 'retry', explanation: 'MOCK: агент не впорався, пробуємо ще раз.', feedback: 'MOCK: try again' };
+    out({ type: 'result', ok: true, text: FENCE + 'json' + NL + JSON.stringify(advice) + NL + FENCE });
+    process.exit(0);
+  }
   // Chat: the prompt also lists task descriptions (which may carry their own directives); obey only the last user message.
   if (input.startsWith('# Chat with the HidForge assistant')) {
     const u = /@mock\s+(\{.*\})/.exec([...input.matchAll(/^User: (.*)$/gm)].at(-1)?.[1] ?? '');
@@ -88,6 +95,7 @@ async function main() {
     }
     process.exit(0);
   }
+  if (d.ask && attempt <= (d.askAttempts ?? 1)) { out({ type: 'result', ok: true, text: `Plan ready, waiting for approval.${NL}OWNER QUESTION: ${d.ask}` }); process.exit(0); }
   for (const [rel, content] of Object.entries(d.write ?? {})) {
     const p = path.resolve(process.cwd(), rel);
     mkdirSync(path.dirname(p), { recursive: true });

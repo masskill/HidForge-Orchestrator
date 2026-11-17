@@ -39,6 +39,38 @@ const EFFORT_LABEL = { low: 'низькі', medium: 'середні', high: 'в�
 const kindLabel = (t) => (t.category ? `${CATEGORY_LABEL[t.category] || t.category} · ${COMPLEXITY_LABEL[t.complexity || 'medium']}` : null);
 const linkText = (l) => [l.agent, l.model, l.effort].filter(Boolean).join(' ');
 const ACTIVE = ['queued', 'running', 'ready'];
+/** Why a task stopped, in plain words (the technical reason stays under «Докази»). */
+const PLAIN_REASONS = [
+  [/agent asked the owner/, 'Агенту потрібна ваша відповідь, без неї він не може продовжити.'],
+  [/no changes/, 'Агент завершив роботу, але не змінив жодного файлу: найчастіше він чекав на погодження, не мав доступу до потрібних файлів або не зрозумів задачу.'],
+  [/outside allowedPaths/, 'Агент змінив файли, які цій задачі змінювати не дозволено.'],
+  [/verification (failed|command refused)/, 'Після змін не пройшла автоматична перевірка (тести або збірка).'],
+  [/conflict|merge failed|merge was interrupted/i, 'Зміни задачі конфліктують зі змінами інших задач, тому злити їх не вдалося.'],
+  [/AI review requested changes/, 'AI-рецензент знайшов проблеми, а спроби закінчились.'],
+  [/AI review rejected/, 'AI-рецензент відхилив зміни.'],
+  [/timeout|stalled/, 'Агент працював занадто довго або завис, і HidForge його зупинив.'],
+  [/usage limit/, 'В агента закінчився ліміт використання.'],
+  [/budget exhausted/, 'Вичерпано бюджет проєкту.'],
+  [/no available agent|unavailable/, 'Немає доступного агента, який може виконати цю задачу.'],
+  [/exited with code|reported an error|without a result/, 'Агент завершився з помилкою.'],
+];
+const plainReason = (r) => (r ? PLAIN_REASONS.find(([re]) => re.test(r))?.[1] ?? null : null);
+/** Project pause / stop buttons for page headers. */
+function projectControls() {
+  const p = state.project;
+  if (!p) return [];
+  const live = state.tasks.some((t) => t.status === 'running');
+  return [
+    p.paused ? PrimaryButton({ icon: 'play', onClick: act(async () => { await api('POST', `/api/projects/${p.id}/resume`); await reloadProject(); render(); toast('Проєкт продовжено', 'success'); }) }, 'Продовжити')
+      : SecondaryButton({ icon: 'pause', title: 'Нові задачі не запускатимуться; агенти, що вже працюють, допрацюють свою спробу', onClick: act(async () => { await api('POST', `/api/projects/${p.id}/pause`, {}); await reloadProject(); render(); toast('Пауза: нові задачі не запускаються', 'success'); }) }, 'Пауза'),
+    live ? DangerButton({ icon: 'stop', onClick: act(async () => {
+      if (!await confirmModal('Зупинити всіх агентів цього проєкту зараз? Їхні спроби не зарахуються, зроблене збережеться, задачі чекатимуть у черзі. Проєкт стане на паузу — натисніть «Продовжити», щоб відновити.', { title: 'Зупинити все', danger: true, ok: 'Зупинити' })) return;
+      const r = await api('POST', `/api/projects/${p.id}/pause`, { stop: true }); await reloadProject(); render(); toast(`Зупинено агентів: ${r.stopped}`, 'success');
+    }) }, 'Зупинити все') : null,
+  ].filter(Boolean);
+}
+const pausedBanner = () => (state.project?.paused ? h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('pause'), h('strong', {}, 'Проєкт на паузі')),
+  h('div', { class: 'text-2' }, 'Нові задачі не запускаються. Натисніть «Продовжити», щоб HidForge знову брав задачі з черги.')) : null);
 const ATTENTION = ['review', 'needs_user_input'];
 const PROBLEM = ['failed', 'blocked'];
 
@@ -342,7 +374,8 @@ function overviewPage() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const chat = chatPanel({ compact: true });
   mount(
-    PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [reportButton(), newTaskButton(), runPlanButton()] }),
+    PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [...projectControls(), reportButton(), newTaskButton(), runPlanButton()] }),
+    pausedBanner(),
     h('div', { class: 'grid stats' },
       StatLink({ href: '#/plan', label: 'Виконано (приблизно)', value: state.planView ? `${state.planView.pct}%` : '—', tone: 'accent',
         hint: state.planView?.currentStage ? `етап ${state.planView.currentStage} з ${state.planView.stages.length}` : 'план порожній' }),
@@ -427,6 +460,10 @@ function activitySummary(e) {
     case 'task.status': return withNote(`статус → ${STATUS_LABEL[d.to] || d.to || 'невідомий'}`);
     case 'task.routed': return withNote(`Призначено: ${[d.provider || d.to || 'автовибір', d.model, d.effort].filter(Boolean).join(' · ')}${d.link ? ` (ланка ${d.link} з ${d.of})` : ''}`);
     case 'task.evidence': return withNote(d.summary || 'Додано результати перевірки');
+    case 'project.paused': return d.stop ? 'Проєкт зупинено й поставлено на паузу' : 'Проєкт на паузі';
+    case 'project.resumed': return 'Проєкт продовжено';
+    case 'doctor.started': return `Автовиправлення: ${d.provider || 'ШІ'} з'ясовує причину`;
+    case 'task.question': return withNote('Потрібна ваша відповідь');
     case 'agent.paused': return `${d.agent}: вичерпано ліміт, пауза до ${d.until ? untilText(d.until) : '—'}`;
     case 'agent.resumed': return `${d.agent}: паузу знято`;
     case 'task.waiting': return `Чекає, поки агенти знову будуть доступні${d.until ? ` (до ${untilText(d.until)})` : ''}`;
@@ -845,7 +882,8 @@ function tasksPage() {
   const search = SearchInput({ placeholder: 'Пошук за назвою, #id, роллю…', value: state.query, onInput: (e) => { state.query = e.target.value; tasksPage(); const i = $('.toolbar input[type=search]'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); } });
   const detail = h('div', { class: 'detail', id: 'detail' });
   mount(
-    PageHeader({ title: 'Задачі', subtitle: 'Незалежні задачі стартують паралельно, залежні — після merge своїх залежностей.', actions: [newTaskButton(), runPlanButton()] }),
+    PageHeader({ title: 'Задачі', subtitle: 'Незалежні задачі стартують паралельно, залежні — після merge своїх залежностей.', actions: [...projectControls(), newTaskButton(), runPlanButton()] }),
+    pausedBanner(),
     h('div', { class: 'toolbar' },
       Segmented(FILTERS.map((x) => ({ id: x.id, label: x.label, count: state.tasks.filter(x.match).length })), state.filter, (id) => { state.filter = id; ls.set('hf-filter', id); tasksPage(); }),
       search,
@@ -856,11 +894,36 @@ function tasksPage() {
   if (hasDetail) renderDetail().catch((e) => toast(e.message, 'danger'));
 }
 
+/** A question from the agent or the auto-fix: the owner answers in plain words and the task runs again. */
+function ownerQuestionBox(t) {
+  const doc = t.artifacts.doctor;
+  const drafts = (state.ownerDraft ||= {});
+  const input = Textarea(drafts[t.id] || '', { placeholder: 'Ваша відповідь своїми словами — наприклад «так, роби» або потрібні дані', 'aria-label': 'Відповідь', rows: 3, oninput: (e) => { drafts[t.id] = e.target.value; } });
+  return h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('alert'), h('strong', {}, 'Потрібна ваша відповідь')),
+    doc?.explanation ? h('div', { class: 'text-2 wrap' }, doc.explanation) : null,
+    h('div', { class: 'wrap', style: 'white-space:pre-wrap' }, t.question), input,
+    h('div', { class: 'row' }, PrimaryButton({ size: 'sm', icon: 'send', onClick: act(async () => {
+      if (!input.value.trim()) { toast('Напишіть відповідь', 'warning'); return; }
+      await taskAction(t.id, 'owner-answer', { text: input.value.trim() }); toast('Відповідь передано — задача запускається знову', 'success');
+    }) }, 'Відповісти й продовжити')));
+}
+/** Blocked / failed: what happened in plain words, and what the auto-fix is doing about it. */
+function whatHappened(t) {
+  const doc = t.artifacts.doctor;
+  const text = doc?.status === 'succeeded' && doc.explanation ? doc.explanation : plainReason(t.feedback) ?? plainReason(t.artifacts.gate?.reason);
+  return h('div', { class: 'callout' }, h('div', { class: 'row wrap' }, icon('alert'), h('strong', {}, 'Що сталося'),
+      doc?.status === 'running' ? Badge('ШІ з\'ясовує причину…', 'info', { live: true }) : null),
+    text ? h('div', { class: 'text-2 wrap' }, text) : null,
+    doc?.status === 'failed' ? h('div', { class: 'muted wrap', style: 'font-size:var(--fs-sm)' }, `Автовиправлення не вдалося: ${doc.error}`) : null,
+    t.artifacts.autoFixExhausted ? h('div', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Автовиправлення вже пробувало двічі — потрібне ваше рішення: відредагуйте задачу, натисніть «Повторити» або спитайте в чаті.') : null);
+}
+
 function quickActions(t) {
   const stop = (fn) => (e) => { e.stopPropagation(); act(fn)(); };
   const b = [];
   if (t.status === 'draft') b.push(IconButton({ icon: 'play', label: 'Запустити', size: 'sm', variant: 'secondary', onClick: stop(() => taskAction(t.id, 'submit')) }));
-  if (['running', 'queued', 'ready'].includes(t.status)) b.push(IconButton({ icon: 'stop', label: 'Зупинити', size: 'sm', variant: 'danger', onClick: stop(() => taskAction(t.id, 'cancel')) }));
+  if (['running', 'queued', 'ready'].includes(t.status)) b.push(IconButton({ icon: 'pause', label: 'Пауза (зроблене збережеться)', size: 'sm', variant: 'secondary', onClick: stop(() => taskAction(t.id, 'pause')) }));
+  if (['running', 'queued', 'ready'].includes(t.status)) b.push(IconButton({ icon: 'stop', label: 'Зупинити й скасувати', size: 'sm', variant: 'danger', onClick: stop(() => taskAction(t.id, 'cancel')) }));
   if (PROBLEM.includes(t.status)) b.push(IconButton({ icon: 'retry', label: 'Повторити', size: 'sm', onClick: stop(() => taskAction(t.id, 'retry')) }));
   return h('div', { class: 'row', style: 'justify-content:flex-end' }, ...b);
 }
@@ -938,7 +1001,10 @@ async function renderDetail() {
     const fb = await promptModal('Що виправити? Агент отримає це в repair-спробі.', { title: `Reject #${t.id}`, ok: 'Відхилити й повторити' }); if (fb === null) return;
     await taskAction(t.id, 'reject', { feedback: fb, retry: true });
   }) }, 'Reject'));
+  const doc = t.artifacts.doctor;
+  if (PROBLEM.includes(t.status) && doc?.status !== 'running' && !t.artifacts.ownerQuestion) primary.push(PrimaryButton({ icon: 'fix', title: 'ШІ з\'ясує причину, виправить задачу й запустить її знову (або поставить вам питання)', onClick: act(() => taskAction(t.id, 'autofix')) }, 'Виправити автоматично'));
   if (PROBLEM.includes(t.status)) primary.push(SecondaryButton({ icon: 'retry', onClick: act(() => taskAction(t.id, 'retry')) }, 'Повторити'));
+  if (ACTIVE.includes(t.status)) primary.push(SecondaryButton({ icon: 'pause', title: 'Зупинити агента й повернути задачу в чернетки; зроблене збережеться, спроба не зарахується', onClick: act(() => taskAction(t.id, 'pause')) }, 'Пауза'));
   if ([...ACTIVE, 'draft'].includes(t.status)) primary.push(DangerButton({ icon: 'stop', onClick: act(() => taskAction(t.id, 'cancel')) }, 'Зупинити'));
   const menu = DropdownMenu({ label: 'Інші дії' }, [
     ['draft', 'ready', 'failed', 'blocked'].includes(t.status) ? { label: 'Редагувати', icon: 'edit', onClick: () => { state.editing = t.id; renderDetail(); } } : null,
@@ -957,7 +1023,9 @@ async function renderDetail() {
         h('h3', { style: 'margin-top:6px' }, t.title)),
       h('div', { class: 'row' }, menu.querySelector('button') ? menu : null, IconButton({ icon: 'close', label: 'Закрити', size: 'sm', onClick: () => go('#/tasks') }))),
     h('div', { class: 'row text-2', style: 'font-size:var(--fs-sm)' }, t.assignedRole, ' · ', providerLabel(t), t.provider === 'mock' ? ' (не справжній AI)' : '', ` · спроба ${t.attempts}/${t.maxAttempts} · ${t.policy}`, kindLabel(t) ? ` · ${kindLabel(t)}` : '', t.effort ? ` · зусилля: ${t.effort}` : ''),
-    t.question ? h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('alert'), h('strong', {}, 'Агент чекає на рішення')), h('div', { class: 'wrap' }, t.question),
+    t.question && t.artifacts.ownerQuestion ? ownerQuestionBox(t) : null,
+    PROBLEM.includes(t.status) && !t.artifacts.ownerQuestion ? whatHappened(t) : null,
+    t.question && !t.artifacts.ownerQuestion ? h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('alert'), h('strong', {}, 'Агент чекає на рішення')), h('div', { class: 'wrap' }, t.question),
       h('div', { class: 'row' }, PrimaryButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: true })) }, 'Дозволити'),
         DangerButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: false })) }, 'Заборонити'))) : null,
     primary.length ? h('div', { class: 'row' }, ...primary) : null,
@@ -1489,12 +1557,16 @@ function reviewSettings(p) {
   const mode = Select([['off', 'Вимкнено'], ['advisory', 'Дорадчий — лише показує вердикт'], ['required', 'Обов\'язковий — merge лише після «схвалено»']], pol.mode);
   const prov = Select([['auto', 'auto (за політикою)'], ...reviewers.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : `${a.name}${a.available ? '' : ' (недоступний)'}`])], pol.provider);
   const model = ModelInput(prov, pol.model);
-  return PanelCard({ title: 'AI-рецензент', subtitle: `QA + Security · проєкт «${p.name}»` },
+  const flags = { autoMerge: pol.autoMerge === true, autoFix: pol.autoFix === true };
+  return PanelCard({ title: 'AI-рецензент і автопілот', subtitle: `QA + Security · проєкт «${p.name}»` },
     h('p', { class: 'text-2', style: 'margin:0' }, 'Після успішних gate-ів окремий агент у режимі лише читання перевіряє diff задачі. В обов\'язковому режимі «потрібні зміни» автоматично повертає задачу агенту із зауваженнями, а Approve & Merge доступний лише після вердикту «схвалено». Остаточне рішення завжди за вами.'),
     h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' },
       Field('Режим', mode), Field('Агент-рецензент', prov, state.agents ? null : 'перевірка агентів…'), Field('Модель', model)),
+    h('div', { class: 'stack' },
+      Toggle({ label: 'Автоприйняття — зливати зміни самостійно, коли пройдені перевірки й AI-рецензія «схвалено» (вмикає обов\'язкову рецензію)', checked: flags.autoMerge, onChange: (v) => { flags.autoMerge = v; } }),
+      Toggle({ label: 'Автовиправлення — коли задача заблокована, ШІ з\'ясовує причину, виправляє задачу й запускає знову або ставить вам просте питання (до 2 разів на задачу; витрачає ліміти)', checked: flags.autoFix, onChange: (v) => { flags.autoFix = v; } })),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
-      await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: modelValue(model) } });
+      await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: modelValue(model), ...flags } });
       await reloadProject(); toast('Політику рецензії збережено', 'success'); render();
     }) }, 'Зберегти')));
 }

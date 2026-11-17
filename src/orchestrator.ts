@@ -18,6 +18,7 @@ import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTempla
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
 import { Chat } from './chat.ts';
+import { Doctor, ownerQuestions } from './doctor.ts';
 import { projectCosts, cellStats } from './costs.ts';
 import { detectLimit, type LimitHit } from './limits.ts';
 import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_CEILING, DEFAULT_MATRIX, resolveChain, reorderByStats, effortFlagFor, type Effort, type Link, type Matrix } from './routing.ts';
@@ -39,6 +40,8 @@ interface Handle {
   exited: Promise<void>;
   /** Last output lines, to recognise a usage-limit failure. */
   tail: string[];
+  /** Interrupted by the owner: back to the queue, or parked as a draft (task pause). The attempt is not counted. */
+  stopped?: 'queue' | 'draft';
 }
 
 /** An agent HidForge stopped using after it hit its usage limit. */
@@ -51,6 +54,7 @@ export class Orchestrator {
   readonly planner: Planner;
   readonly reviewer: Reviewer;
   readonly chat: Chat;
+  readonly doctor: Doctor;
   readonly pluginErrors: PluginLoad['errors'];
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
@@ -79,6 +83,88 @@ export class Orchestrator {
     this.reviewer = new Reviewer(this);
     this.chat = new Chat(this);
     this.registry.setPauses((id) => this.pauses()[id] ?? null);
+    this.doctor = new Doctor(this);
+    // auto-fix: a task that ends up blocked or failed is diagnosed (when the project has it on); deferred so the status change completes first
+    this.store.bus.on('event', (ev: { type: string; taskId: number | null; data: { to?: string; note?: string } | null }) => {
+      if (ev.type === 'task.status' && ev.taskId && ['blocked', 'failed'].includes(String(ev.data?.to)))
+        setImmediate(() => { if (this.timer) void this.track(this.doctor.maybeStart(ev.taskId!, ev.data?.note)); });
+    });
+  }
+
+  // ------------------------------------------------------------------ owner controls: pause / stop
+  pausedProjects(): number[] { return this.store.getSetting<number[]>('pausedProjects', []); }
+  isPaused(projectId: number): boolean { return this.pausedProjects().includes(projectId); }
+  /** Pause: no new task of the project starts; running agents finish their attempt. stop = also interrupt them now
+   *  (their attempt is not counted, the work so far stays in the worktree, the tasks wait in the queue). */
+  async pauseProject(projectId: number, stop = false): Promise<{ paused: true; stopped: number }> {
+    this.store.getProject(projectId);
+    if (!this.isPaused(projectId)) this.store.setSetting('pausedProjects', [...this.pausedProjects(), projectId]);
+    this.store.event({ projectId, type: 'project.paused', data: { stop } });
+    let stopped = 0;
+    if (stop) {
+      for (const h of [...this.handles.values()]) {
+        if (this.store.getTask(h.taskId).projectId !== projectId) continue;
+        await this.interrupt(h, 'queue');
+        stopped++;
+      }
+    }
+    return { paused: true, stopped };
+  }
+  async resumeProject(projectId: number): Promise<{ paused: false }> {
+    this.store.getProject(projectId);
+    this.store.setSetting('pausedProjects', this.pausedProjects().filter((x) => x !== projectId));
+    this.store.event({ projectId, type: 'project.resumed', data: {} });
+    void this.track(this.autopilot(projectId));
+    return { paused: false };
+  }
+  /** Task pause: interrupt the run (if any) and park the task as a draft. The work so far stays in its worktree and the attempt is
+   *  not counted; "Run" continues it. */
+  async pauseTask(id: number): Promise<Task> {
+    const t = this.store.getTask(id);
+    if (!['running', 'queued', 'ready'].includes(t.status)) throw new Conflict(`cannot pause a ${t.status} task`);
+    const h = [...this.handles.values()].find((x) => x.taskId === id);
+    if (h) await this.interrupt(h, 'draft');
+    else this.park(t);
+    return this.store.getTask(id);
+  }
+  private async interrupt(h: Handle, to: 'queue' | 'draft'): Promise<void> {
+    h.stopped = to;
+    if (h.child.pid) await killTree(h.child.pid);
+    await h.exited;
+  }
+  private park(t: Task): void {
+    if (t.status === 'queued') t = this.store.setStatus(t.id, 'ready', {}, 'paused by owner');
+    if (t.status === 'ready') this.store.setStatus(t.id, 'draft', {}, 'paused by owner');
+  }
+
+  /** The owner answers the question an agent or the auto-fix asked: the answer is added to the task and it runs again. */
+  answerOwner(id: number, text: unknown): Task {
+    const t = this.store.getTask(id);
+    if (!['blocked', 'failed'].includes(t.status) || !t.question) throw new Conflict('this task is not waiting for your answer');
+    const a = String(text ?? '').trim();
+    if (!a) throw new BadRequest('the answer is empty');
+    if (a.length > 10_000) throw new BadRequest('the answer is longer than 10000 characters');
+    const description = `${t.description}\n\n## Owner's answer (${new Date().toISOString().slice(0, 16).replace('T', ' ')})\nQuestion: ${t.question}\nAnswer: ${a}`;
+    this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: `Owner answered: ${a.slice(0, 300)}` });
+    return this.store.setStatus(id, 'queued', { description, question: null, notBefore: null, feedback: `The owner answered your question (see "Owner's answer" in the description). Continue the task now.`,
+      maxAttempts: Math.max(t.maxAttempts, t.attempts + 2), artifacts: { ...t.artifacts, ownerQuestion: undefined, autoFixExhausted: undefined } }, 'owner answered');
+  }
+
+  /** Apply the project's automation to tasks already waiting: review/merge what passed its gates, diagnose what is stuck. */
+  async autopilot(projectId: number): Promise<void> {
+    const p = this.store.getProject(projectId);
+    if (this.isPaused(projectId)) return;
+    for (const t of this.store.listTasks(projectId)) {
+      const gate = t.artifacts.gate as { passed?: boolean } | undefined;
+      if (t.status === 'review' && gate?.passed && p.reviewPolicy.mode !== 'off') {
+        const r = t.artifacts.aiReview as { attempt?: number; status?: string; verdict?: string } | undefined;
+        const current = r?.attempt === t.attempts;
+        if (current && r?.status === 'succeeded' && r.verdict === 'approve') {
+          if (p.reviewPolicy.autoMerge) await this.approve(t.id, 'auto').catch((e: Error) => this.store.addEvidence(t.id, { kind: 'merge', ok: false, summary: `Auto-merge failed: ${e.message}` }));
+        } else if (!current || r?.status === 'failed') await this.reviewer.autoStart(t.id);
+      }
+      if (['blocked', 'failed'].includes(t.status)) await this.doctor.maybeStart(t.id);
+    }
   }
 
   // ------------------------------------------------------------------ usage limits
@@ -320,21 +406,21 @@ export class Orchestrator {
   }
 
   /** Human "Approve & Merge". Merges are serialized. */
-  approve(id: number): Promise<Task> {
-    const p = this.mergeChain.then(() => this.doApprove(id));
+  approve(id: number, by: 'user' | 'auto' = 'user'): Promise<Task> {
+    const p = this.mergeChain.then(() => this.doApprove(id, by));
     this.mergeChain = p.catch(() => {});
     return this.track(p);
   }
 
-  private async doApprove(id: number): Promise<Task> {
+  private async doApprove(id: number, by: 'user' | 'auto' = 'user'): Promise<Task> {
     let t = this.store.getTask(id);
     const gate = t.artifacts.gate as { passed?: boolean } | undefined;
     if (!['review', 'blocked'].includes(t.status) || !gate?.passed) throw new Conflict('only tasks with passed gates (review, or blocked after a failed merge) can be merged');
     const blocker = this.reviewer.mergeBlocker(t);
     if (blocker) throw new Conflict(blocker);
     const p = this.store.getProject(t.projectId);
-    t = this.store.setStatus(id, 'accepted', {}, 'approved by user');
-    this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: 'Approved by user' });
+    t = this.store.setStatus(id, 'accepted', {}, by === 'auto' ? 'approved automatically' : 'approved by user');
+    this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: by === 'auto' ? 'Approved automatically: all gates passed and the AI review approved' : 'Approved by user' });
     if (!t.branch || !t.workspace || !t.baseCommit) return this.store.setStatus(id, 'merged', {}, 'nothing to merge');
     const changed = await this.ws.changedFiles(t.workspace, t.baseCommit);
     if (changed.length === 0) {
@@ -397,9 +483,11 @@ export class Orchestrator {
       }
       const nowIso = new Date().toISOString();
       let free = this.maxConcurrent - this.store.liveRuns().length;
+      const paused = new Set(this.pausedProjects());
       for (const t of this.store.tasksByStatus('queued')) {
         if (free <= 0) break;
         if (t.notBefore && t.notBefore > nowIso) continue;
+        if (paused.has(t.projectId)) continue;
         if (await this.startRun(t)) free--;
       }
     } catch (e) {
@@ -572,6 +660,17 @@ export class Orchestrator {
     h.done = true;
     this.handles.delete(h.run.id);
     const usage = h.result?.usage ?? null;
+    if (h.stopped) {
+      this.store.releaseLock(h.workspace);
+      this.store.endRun(h.run.id, 'canceled', { exitCode: code, usage, error: 'stopped by the owner' });
+      const t = this.store.getTask(h.taskId);
+      if (t.status === 'running') {
+        this.store.addEvidence(t.id, { kind: 'scheduler', ok: true, summary: `Attempt ${t.attempts} ${h.stopped === 'draft' ? 'paused' : 'stopped'} by the owner; it is not counted, the work so far stays in the worktree` });
+        const q = this.store.setStatus(t.id, 'queued', { attempts: Math.max(0, t.attempts - 1) }, h.stopped === 'draft' ? 'paused by owner' : 'stopped by owner');
+        if (h.stopped === 'draft') this.park(q);
+      }
+      return;
+    }
     if (h.canceled) { this.store.releaseLock(h.workspace); this.store.endRun(h.run.id, 'canceled', { exitCode: code, usage }); return; }
     let failure: string | null = null;
     if (h.killReason) failure = h.killReason;
@@ -589,7 +688,8 @@ export class Orchestrator {
     if (hit) { this.limitHandover(t, h.run.provider, hit); return; }
     if (failure) { this.failOrRetry(t, failure); return; }
     this.store.addEvidence(t.id, { kind: 'run', ok: true, summary: `Attempt ${t.attempts} finished (${h.adapter.mock ? 'MOCK' : h.adapter.name})`, detail: h.result?.text });
-    this.store.setStatus(t.id, 'review', { artifacts: { ...t.artifacts, gate: undefined } }, 'worker finished, running gates');
+    const asked = ownerQuestions([h.result?.text, ...h.tail]);
+    this.store.setStatus(t.id, 'review', { artifacts: { ...t.artifacts, gate: undefined, askedOwner: asked.length ? asked : undefined } }, 'worker finished, running gates');
     await this.runGates(t.id);
   }
 
@@ -631,6 +731,13 @@ export class Orchestrator {
       if (t.policy === 'read-only') {
         if (files.length) return fail(`read-only task modified files: ${files.join(', ')}`, false);
       } else {
+        const asked = t.artifacts.askedOwner as string[] | undefined;
+        if (!files.length && asked?.length) {
+          this.store.addEvidence(id, { kind: 'gate', ok: false, summary: `The agent needs the owner's answer before it can continue: ${asked.join(' | ')}` });
+          this.store.setStatus(id, 'blocked', { question: asked.join('\n'), feedback: 'the agent asked the owner a question',
+            artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: false, reason: 'the agent asked the owner a question' }, ownerQuestion: true } }, 'agent asked the owner');
+          return;
+        }
         if (!files.length) return fail('worker produced no changes');
         const bad = checkAllowedPaths(files, t.allowedPaths);
         if (bad.length) return fail(`changes outside allowedPaths: ${bad.join(', ')}`);
@@ -654,7 +761,7 @@ export class Orchestrator {
       this.store.patchTask(id, { feedback: null, artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: true, at: new Date().toISOString() } } });
       const mode = p.reviewPolicy.mode;
       this.store.addEvidence(id, { kind: 'gate', ok: true, summary: mode === 'off' ? 'All gates passed — waiting for human Approve & Merge'
-        : `All gates passed — AI review (${mode}) next, then human Approve & Merge` });
+        : `All gates passed — AI review (${mode}) next, then ${p.reviewPolicy.autoMerge ? 'automatic merge if it approves' : 'human Approve & Merge'}` });
       await this.reviewer.autoStart(id);
     } catch (e) {
       fail(`gate error: ${(e as Error).message}`, false);

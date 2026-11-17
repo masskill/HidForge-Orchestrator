@@ -17,18 +17,18 @@ export function extractJson(text: string): unknown {
 }
 
 /** Resolve 'auto' via routing policy and make sure the agent is available and can run read-only. */
-export async function resolveReadOnlyAgent(orch: Orchestrator, provider: string, purpose: string, auto: { links?: Link[]; avoidVendor?: string } = {}):
+export async function resolveReadOnlyAgent(orch: Orchestrator, provider: string, purpose: string, auto: { links?: Link[]; avoidVendor?: string; exclude?: string } = {}):
   Promise<{ adapter: AgentAdapter; provider: string; model?: string; effort?: string | null }> {
   const { store, registry } = orch;
   let link: Link | undefined;
   if (provider === 'auto') {
     const st = await registry.status();
     const ok = (id: string) => Boolean(st.find((s) => s.id === id)?.available) && registry.get(id)?.capabilities().readOnlyMode === 'supported';
-    link = auto.links?.find((l) => ok(l.agent));
+    link = auto.links?.find((l) => ok(l.agent) && l.agent !== auto.exclude);
     if (link) provider = link.agent;
     else {
       const table = store.getSetting('routingTable', DEFAULT_ROUTING);
-      const order = table[orch.routingPolicy] ?? [];
+      const order = (table[orch.routingPolicy] ?? []).filter((id) => id !== auto.exclude);
       const other = auto.avoidVendor ? order.filter((id) => vendorOf(id, null) !== auto.avoidVendor) : order;
       const picked = (await registry.pick(orch.routingPolicy, { ...table, [orch.routingPolicy]: other })) ?? (await registry.pick(orch.routingPolicy, table));
       if (!picked) throw new BadRequest(`no available agent for routing policy '${orch.routingPolicy}'`);

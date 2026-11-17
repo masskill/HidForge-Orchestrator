@@ -81,6 +81,13 @@ ${task.policy === 'read-only' || tpl?.readOnly ? '- modify any file at all: this
 ## Validation (run by the orchestrator after you finish, you do not need to run them)
 ${list(task.verifyCommands, '- (no commands configured)')}
 ${task.feedback ? `\n## Feedback from the previous attempt — fix this\n${task.feedback}\n` : ''}
+## Working unattended
+Nobody watches this run and nobody can answer you while it runs, so do not stop to wait for approval of a plan.
+If the task or the project rules require the owner's approval first, or you cannot continue without information only the owner has:
+change nothing and end your final message with one line per question, in the owner's language:
+OWNER QUESTION: <the question>
+HidForge shows these questions to the owner and runs the task again with the answers.
+
 ## Final report
 Finish with a short summary: what you changed (files), what you did not do, and any open risks.
 `;
