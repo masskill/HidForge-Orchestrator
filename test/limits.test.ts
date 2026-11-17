@@ -30,6 +30,10 @@ test('limits: reset time from duration, epoch or clock time; defaults and bounds
   assert.equal(mins(detectLimit('HTTP 429 Too Many Requests', now)?.until), 5, 'rate default');
   assert.equal(mins(detectLimit('rate limit, retry after 5 seconds', now)?.until), 1, 'at least a minute');
   assert.equal(resetTime('nothing here', now), null);
+  // the real Codex message seen on this PC (2026-11-17)
+  const codex = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 23rd, 2026 12:49 PM.";
+  assert.equal(new Date(detectLimit(codex, now)!.until).getTime(), new Date(2026, 10, 23, 12, 49).getTime(), 'calendar date with year and time');
+  assert.equal(new Date(resetTime('resets Jan 2 at 9:00 AM', now)!).getTime(), new Date(2027, 0, 2, 9, 0).getTime(), 'no year: the next such date');
   assert.equal(detectLimit('Quota exceeded', now)?.kind, 'quota');
   assert.equal(detectLimit('Too many requests', now)?.kind, 'rate');
 });

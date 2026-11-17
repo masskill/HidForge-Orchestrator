@@ -164,6 +164,11 @@ export class Orchestrator {
           if (p.reviewPolicy.autoMerge) await this.approve(t.id, 'auto').catch((e: Error) => this.store.addEvidence(t.id, { kind: 'merge', ok: false, summary: `Auto-merge failed: ${e.message}` }));
         } else if (!current || r?.status === 'failed') await this.reviewer.autoStart(t.id);
       }
+      if (['blocked', 'failed'].includes(t.status) && p.reviewPolicy.autoAnswer && t.artifacts.ownerQuestion && !t.artifacts.ownerOnly) {
+        const q = t.question;
+        this.store.patchTask(t.id, { question: null, artifacts: { ...t.artifacts, ownerQuestion: undefined, pendingQuestion: q } });
+        this.store.addEvidence(t.id, { kind: 'doctor', ok: true, summary: 'Auto-answer is on: the question is handed to the AI to decide' });
+      }
       if (['blocked', 'failed'].includes(t.status)) await this.doctor.maybeStart(t.id);
     }
   }
@@ -735,9 +740,10 @@ export class Orchestrator {
       } else {
         const asked = t.artifacts.askedOwner as string[] | undefined;
         if (!files.length && asked?.length) {
-          this.store.addEvidence(id, { kind: 'gate', ok: false, summary: `The agent needs the owner's answer before it can continue: ${asked.join(' | ')}` });
-          this.store.setStatus(id, 'blocked', { question: asked.join('\n'), feedback: 'the agent asked the owner a question',
-            artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: false, reason: 'the agent asked the owner a question' }, ownerQuestion: true } }, 'agent asked the owner');
+          const delegate = p.reviewPolicy.autoAnswer;
+          this.store.addEvidence(id, { kind: 'gate', ok: false, summary: `The agent needs the owner's answer before it can continue${delegate ? ' (auto-answer will decide)' : ''}: ${asked.join(' | ')}` });
+          this.store.setStatus(id, 'blocked', { question: delegate ? null : asked.join('\n'), feedback: 'the agent asked the owner a question',
+            artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: false, reason: 'the agent asked the owner a question' }, ownerQuestion: delegate ? undefined : true } }, 'agent asked the owner');
           return;
         }
         if (!files.length) return fail('worker produced no changes');

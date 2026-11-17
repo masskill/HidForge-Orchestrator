@@ -30,9 +30,10 @@ export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
 }
 
 export type ReviewMode = 'off' | 'advisory' | 'required';
-/** autoMerge: merge by itself once the AI review approves; autoFix: diagnose and retry blocked/failed tasks (see doctor.ts). */
-export interface ReviewPolicy { mode: ReviewMode; provider: string; model: string | null; autoMerge: boolean; autoFix: boolean }
-export const DEFAULT_REVIEW_POLICY: ReviewPolicy = { mode: 'off', provider: 'auto', model: null, autoMerge: false, autoFix: false };
+/** autoMerge: merge by itself once the AI review approves; autoFix: diagnose and retry blocked/failed tasks (see doctor.ts);
+ *  autoAnswer: the auto-fix answers agents' questions itself and asks the owner only what nobody else can supply. */
+export interface ReviewPolicy { mode: ReviewMode; provider: string; model: string | null; autoMerge: boolean; autoFix: boolean; autoAnswer: boolean }
+export const DEFAULT_REVIEW_POLICY: ReviewPolicy = { mode: 'off', provider: 'auto', model: null, autoMerge: false, autoFix: false, autoAnswer: false };
 
 export interface Project {
   id: number; name: string; repoPath: string; baseBranch: string; goal: string;

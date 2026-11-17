@@ -15,11 +15,13 @@ const HUMAN_NOTES = ['rejected', 'command denied', 'canceled by user'];
 
 export interface Diagnosis {
   status: 'running' | 'succeeded' | 'failed'; at: string; provider: string; model: string | null;
-  action?: 'retry' | 'ask_owner' | 'give_up'; explanation?: string; question?: string; changed?: string[]; error?: string;
+  action?: 'retry' | 'ask_owner' | 'give_up'; explanation?: string; question?: string; changed?: string[]; decisions?: string; error?: string;
 }
 export interface DoctorAdvice {
   action: 'retry' | 'ask_owner' | 'give_up'; explanation: string; question: string; feedback: string;
   changes: { description?: string; acceptanceCriteria?: string; allowedPaths?: string[]; complexity?: string };
+  /** Auto-answer: the decisions taken on the owner's behalf, appended to the task description. */
+  decisions: string;
 }
 
 export function parseAdvice(raw: unknown): DoctorAdvice {
@@ -41,10 +43,10 @@ export function parseAdvice(raw: unknown): DoctorAdvice {
   if (!explanation) throw new Error('explanation is missing');
   const question = s(o.question, 4000);
   if (action === 'ask_owner' && !question) throw new Error('ask_owner without a question');
-  return { action: action as DoctorAdvice['action'], explanation, question, feedback: s(o.feedback, 5000), changes };
+  return { action: action as DoctorAdvice['action'], explanation, question, feedback: s(o.feedback, 5000), changes, decisions: s(o.decisions, 10_000) };
 }
 
-export function buildDoctorPrompt(t: Task, reason: string, endings: string): string {
+export function buildDoctorPrompt(t: Task, reason: string, endings: string, autoAnswer = false): string {
   const list = (xs: string[], empty: string) => (xs.length ? xs.map((x) => `- ${x}`).join(NL) : empty);
   const ev = t.evidence.slice(-15).map((e) => `- [${e.kind} ${e.ok ? 'ok' : 'FAIL'}] ${e.summary}${e.detail && !e.ok ? NL + '  ' + e.detail.slice(-800).replace(/\n/g, NL + '  ') : ''}`);
   return `# Task diagnosis request — HidForge task #${t.id}
@@ -83,8 +85,15 @@ ${endings || '(no output recorded)'}
 ## Decide
 - "retry": an agent can do it once the task is corrected. Give only the fields you change, and precise feedback for the next
   attempt. Stay within the task's intent; allowedPaths are repository-relative globs.
-- "ask_owner": only the owner can unblock it — an approval the project rules require, a missing decision or data, an account,
-  a credential or a manual step. Ask short, concrete questions a non-programmer can answer (yes/no where possible).
+${autoAnswer ? `- THE OWNER HAS DELEGATED DECISIONS TO YOU. When the blocker is a question, a choice or an approval of a plan (including
+  approvals the project rules ask for), decide yourself as a careful senior engineer would: read the repository, docs and
+  open owner questions, pick the safest sensible option (the recommended / default one when offered), and answer with
+  "retry". Write every decision, with a one-line reason, in "decisions" — it is added to the task description and the
+  owner can change it later. Widen allowedPaths when the work needs it.
+- "ask_owner" ONLY for what nobody but the owner can supply or should do: passwords, keys, tokens or other secrets;
+  payments or purchases; signing in to or creating accounts; a manual step on their computer or a service; deleting,
+  publishing or sending real data in a way that cannot be undone. Ask short, concrete questions (yes/no where possible).` : `- "ask_owner": only the owner can unblock it — an approval the project rules require, a missing decision or data, an account,
+  a credential or a manual step. Ask short, concrete questions a non-programmer can answer (yes/no where possible).`}
 - "give_up": the task is wrong, a duplicate, or already done.
 
 Reply with ONLY one JSON object inside a \`\`\`json fenced block:
@@ -92,6 +101,7 @@ Reply with ONLY one JSON object inside a \`\`\`json fenced block:
   "explanation": "2-4 short sentences IN UKRAINIAN for a non-programmer: what happened and what happens next",
   "question": "ask_owner only: the questions to the owner, IN UKRAINIAN",
   "feedback": "retry only: instructions for the next attempt",
+  "decisions": "decisions taken on the owner's behalf, one per line with its reason (auto-answer only)",
   "changes": { "description": "…", "acceptanceCriteria": "…", "allowedPaths": ["…"], "complexity": "low|medium|high" } }
 `;
 }
@@ -155,7 +165,8 @@ export class Doctor {
       this.save(t.id, { status: 'running', at, ...meta });
       store.event({ projectId: p.id, taskId: t.id, type: 'doctor.started', data: meta });
       await ws.addDetached(p.repoPath, p.baseBranch, dir);
-      const prompt = buildDoctorPrompt(t, t.feedback ?? '', this.endings(t));
+      const pending = t.artifacts.pendingQuestion ? `\n\nOpen question that was waiting for the owner:\n${String(t.artifacts.pendingQuestion)}` : '';
+      const prompt = buildDoctorPrompt(t, (t.feedback ?? '') + pending, this.endings(t), p.reviewPolicy.autoAnswer);
       const inv = adapter.buildInvocation({ prompt, workspace: dir, model: model ?? null, effort: effort ?? null, policy: 'read-only', trustWorkspace: this.orch.trusts(provider) });
       const r = await runOnce(adapter, inv, dir, { timeoutMs: 900_000, stallMs: this.orch.opts.stallTimeoutSec * 1000, onEvent: () => {} }).done;
       const final = r.result?.text?.trim() && r.result.text !== 'turn completed' ? r.result.text : r.messages.join(NL);
@@ -193,19 +204,25 @@ export class Doctor {
     if (!['blocked', 'failed'].includes(cur.status)) return; // the owner acted meanwhile
     const autoFixes = Number(cur.artifacts.autoFixes ?? 0) + 1;
     let changed: string[] = [];
+    const auto = this.orch.store.getProject(cur.projectId).reviewPolicy.autoAnswer;
+    if (a.action === 'retry' && auto && a.decisions) {
+      const base = a.changes.description ?? cur.description;
+      a.changes.description = `${base}\n\n## Decisions taken on the owner's behalf (auto-answer, ${new Date().toISOString().slice(0, 16).replace('T', ' ')})\n${a.decisions}`;
+    }
     if (a.action === 'retry' && Object.keys(a.changes).length) {
       try { this.orch.updateTask(id, a.changes as Partial<Task>); changed = Object.keys(a.changes); }
       catch (e) { store.addEvidence(id, { kind: 'doctor', ok: false, summary: `Auto-fix proposed invalid task changes, kept the task as it was: ${(e as Error).message}` }); }
     }
-    const d: Diagnosis = { status: 'succeeded', ...meta, action: a.action, explanation: a.explanation, question: a.question || undefined, changed };
+    const d: Diagnosis = { status: 'succeeded', ...meta, action: a.action, explanation: a.explanation, question: a.question || undefined, changed, decisions: a.decisions || undefined };
     store.addEvidence(id, { kind: 'doctor', ok: a.action === 'retry', detail: a.feedback || undefined,
-      summary: `Auto-fix (${meta.provider}): ${a.action === 'retry' ? `retrying${changed.length ? ` with corrected ${changed.join(', ')}` : ''}` : a.action === 'ask_owner' ? 'the owner has to answer first' : 'the task cannot be done as written'} — ${a.explanation}` });
+      summary: `Auto-fix (${meta.provider}): ${a.action === 'retry' ? `${auto && a.decisions ? 'decided for the owner and ' : ''}retrying${changed.length ? ` with corrected ${changed.join(', ')}` : ''}` : a.action === 'ask_owner' ? 'the owner has to answer first' : 'the task cannot be done as written'} — ${a.explanation}` });
     const t = store.getTask(id);
     if (a.action === 'retry') {
       store.setStatus(id, 'queued', { feedback: a.feedback || t.feedback, question: null, notBefore: null, maxAttempts: Math.max(t.maxAttempts, t.attempts + 2),
-        artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: undefined, chainFrom: t.attempts } }, 'auto-fix: retry');
+        artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: undefined, pendingQuestion: undefined, chainFrom: t.attempts } }, 'auto-fix: retry');
     } else if (a.action === 'ask_owner') {
-      store.patchTask(id, { question: a.question, artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: true } });
+      // with auto-answer on, what still reaches the owner is owner-only (secrets, payments, accounts, manual steps)
+      store.patchTask(id, { question: a.question, artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: true, ownerOnly: auto || undefined, pendingQuestion: undefined } });
       store.event({ projectId: t.projectId, taskId: id, type: 'task.question', data: { question: a.question } });
     } else {
       store.patchTask(id, { artifacts: { ...t.artifacts, autoFixes, doctor: d } });

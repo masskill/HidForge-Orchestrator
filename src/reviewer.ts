@@ -38,7 +38,7 @@ export function normalizeReviewPolicy(raw: unknown, knownProvider: (id: string) 
   const model = cleanModel(o.model);
   const autoMerge = o.autoMerge === true;
   // auto-merge needs a review verdict to act on
-  return { mode: (autoMerge && mode === 'off' ? 'required' : mode) as ReviewPolicy['mode'], provider, model, autoMerge, autoFix: o.autoFix === true };
+  return { mode: (autoMerge && mode === 'off' ? 'required' : mode) as ReviewPolicy['mode'], provider, model, autoMerge, autoFix: o.autoFix === true || o.autoAnswer === true, autoAnswer: o.autoAnswer === true };
 }
 
 export function buildReviewPrompt(task: Task, project: Project, attempt: number, diff: string, files: string[]): string {

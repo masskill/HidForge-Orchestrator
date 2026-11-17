@@ -127,3 +127,36 @@ test('project .env reaches verification commands only when switched on; never th
     assert.ok(!existsSync(path.join(t.workspace!, '.env')), 'the .env is not copied into the worktree');
   } finally { await orch.stop(); }
 });
+
+test('auto-answer: the AI decides the agent\'s question and the task goes on; waiting questions are handed over; owner-only stays with the owner', async () => {
+  const { orch, project } = await setup();
+  try {
+    const decide = { action: 'retry', explanation: 'Обрано рекомендований варіант.', decisions: '1) План погоджено — це рекомендований варіант.', feedback: 'The plan is approved, implement it.' };
+    // a question already waiting for the owner, then auto-answer is switched on
+    const w = orch.createTask(project.id, { title: 'waiting', provider: 'mock', allowedPaths: ['w/**'], description: mock({ ask: 'Погоджуєте план?', doctor: decide, write: { 'w/w.txt': 'W' } }) });
+    orch.submit(w.id);
+    assert.equal((await waitStatus(orch, w.id, ['blocked'])).question, 'Погоджуєте план?');
+    orch.store.updateProject(project.id, { reviewPolicy: policy({ mode: 'off', autoAnswer: true }) });
+    assert.equal(orch.store.getProject(project.id).reviewPolicy.autoFix, true, 'auto-answer implies auto-fix');
+    await orch.autopilot(project.id);
+    const wd = await waitStatus(orch, w.id, ['review'], 30_000);
+    assert.match(wd.description, /Decisions taken on the owner's behalf[\s\S]*План погоджено/);
+    assert.equal(wd.question, null);
+
+    // with auto-answer on, an agent's question never reaches the owner
+    const t = orch.createTask(project.id, { title: 'live', provider: 'mock', allowedPaths: ['l/**'], description: mock({ ask: 'Яку теку взяти?', doctor: decide, write: { 'l/l.txt': 'L' } }) });
+    orch.submit(t.id);
+    const td = await waitStatus(orch, t.id, ['review'], 30_000);
+    assert.equal(td.attempts, 2);
+    assert.ok(!orch.store.events({ taskId: t.id, type: 'task.question' }).length, 'the owner was not asked');
+
+    // owner-only questions still reach the owner and are not handed back to the AI
+    const k = orch.createTask(project.id, { title: 'key', provider: 'mock', maxAttempts: 1, allowedPaths: ['k/**'],
+      description: mock({ failAttempts: 9, doctor: { action: 'ask_owner', explanation: 'Потрібен пароль.', question: 'Введіть пароль бази в .env' } }) });
+    orch.submit(k.id);
+    const kd = await waitFor(() => { const x = orch.store.getTask(k.id); return x.question ? x : null; }, 20_000, 'owner-only question');
+    assert.equal(kd.artifacts.ownerOnly, true);
+    await orch.autopilot(project.id);
+    assert.equal(orch.store.getTask(k.id).question, 'Введіть пароль бази в .env', 'not handed back to the AI');
+  } finally { await orch.stop(); }
+});

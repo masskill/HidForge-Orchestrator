@@ -1027,6 +1027,7 @@ async function renderDetail() {
     h('div', { class: 'row text-2', style: 'font-size:var(--fs-sm)' }, t.assignedRole, ' · ', providerLabel(t), t.provider === 'mock' ? ' (не справжній AI)' : '', ` · спроба ${t.attempts}/${t.maxAttempts} · ${t.policy}`, kindLabel(t) ? ` · ${kindLabel(t)}` : '', t.effort ? ` · зусилля: ${t.effort}` : ''),
     t.question && t.artifacts.ownerQuestion ? ownerQuestionBox(t) : null,
     PROBLEM.includes(t.status) && !t.artifacts.ownerQuestion ? whatHappened(t) : null,
+    t.artifacts.doctor?.decisions ? Disclosure('Рішення, які ШІ ухвалив за вас (можна змінити, відредагувавши задачу)', h('div', { class: 'text-2 wrap', style: 'white-space:pre-wrap;font-size:var(--fs-sm)' }, t.artifacts.doctor.decisions)) : null,
     t.question && !t.artifacts.ownerQuestion ? h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('alert'), h('strong', {}, 'Агент чекає на рішення')), h('div', { class: 'wrap' }, t.question),
       h('div', { class: 'row' }, PrimaryButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: true })) }, 'Дозволити'),
         DangerButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: false })) }, 'Заборонити'))) : null,
@@ -1562,14 +1563,15 @@ function reviewSettings(p) {
   const mode = Select([['off', 'Вимкнено'], ['advisory', 'Дорадчий — лише показує вердикт'], ['required', 'Обов\'язковий — merge лише після «схвалено»']], pol.mode);
   const prov = Select([['auto', 'auto (за політикою)'], ...reviewers.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : `${a.name}${a.available ? '' : ' (недоступний)'}`])], pol.provider);
   const model = ModelInput(prov, pol.model);
-  const flags = { autoMerge: pol.autoMerge === true, autoFix: pol.autoFix === true };
+  const flags = { autoMerge: pol.autoMerge === true, autoFix: pol.autoFix === true, autoAnswer: pol.autoAnswer === true };
   return PanelCard({ title: 'AI-рецензент і автопілот', subtitle: `QA + Security · проєкт «${p.name}»` },
     h('p', { class: 'text-2', style: 'margin:0' }, 'Після успішних gate-ів окремий агент у режимі лише читання перевіряє diff задачі. В обов\'язковому режимі «потрібні зміни» автоматично повертає задачу агенту із зауваженнями, а Approve & Merge доступний лише після вердикту «схвалено». Остаточне рішення завжди за вами.'),
     h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' },
       Field('Режим', mode), Field('Агент-рецензент', prov, state.agents ? null : 'перевірка агентів…'), Field('Модель', model)),
     h('div', { class: 'stack' },
       Toggle({ label: 'Автоприйняття — зливати зміни самостійно, коли пройдені перевірки й AI-рецензія «схвалено» (вмикає обов\'язкову рецензію)', checked: flags.autoMerge, onChange: (v) => { flags.autoMerge = v; } }),
-      Toggle({ label: 'Автовиправлення — коли задача заблокована, ШІ з\'ясовує причину, виправляє задачу й запускає знову або ставить вам просте питання (до 2 разів на задачу; витрачає ліміти)', checked: flags.autoFix, onChange: (v) => { flags.autoFix = v; } })),
+      Toggle({ label: 'Автовиправлення — коли задача заблокована, ШІ з\'ясовує причину, виправляє задачу й запускає знову або ставить вам просте питання (до 2 разів на задачу; витрачає ліміти)', checked: flags.autoFix, onChange: (v) => { flags.autoFix = v; } }),
+      Toggle({ label: 'Автовідповіді — на питання агентів (план, вибір варіанта, погодження) ШІ відповідає сам найрозумнішим варіантом і записує рішення в задачу; вас питає лише про паролі, ключі, оплати, акаунти, ручні дії та незворотне видалення чи публікацію даних (вмикає автовиправлення)', checked: flags.autoAnswer, onChange: (v) => { flags.autoAnswer = v; } })),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
       await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: modelValue(model), ...flags } });
       await reloadProject(); toast('Політику рецензії збережено', 'success'); render();

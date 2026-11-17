@@ -11,6 +11,7 @@ const QUOTA = [
 ];
 const RATE = [/\brate[ _-]?limit(?!er|ing)/i, /too many requests/i, /\b(?:http|status|code|error)\W{0,3}429\b/i, /\b429\b.{0,30}(?:too many|rate)/i, /overloaded/i];
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const MIN_MS = 60_000;
 const MAX_MS = 8 * 24 * 3600_000;
 
@@ -25,6 +26,18 @@ export function resetTime(text: string, now: Date): Date | null {
     const ms = num(/(\d+)\s*(?:days?|d)\b/i) * 86_400_000 + num(/(\d+)\s*(?:hours?|hrs?|h)\b/i) * 3_600_000
       + num(/(\d+)\s*(?:minutes?|mins?|m)\b/i) * 60_000 + num(/(\d+)\s*(?:seconds?|secs?|s)\b/i) * 1000;
     if (ms > 0) return new Date(now.getTime() + ms);
+  }
+  // a calendar date, as Codex writes it: "try again at Nov 23rd, 2026 12:49 PM" (local time)
+  const dm = /(?:try again|retry|resets?|available|until)\D{0,12}?\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})?(?:,?\s*(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i.exec(text);
+  if (dm) {
+    let h = Number(dm[4] ?? 0);
+    const ap = dm[6]?.toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    const month = MONTHS.indexOf(dm[1]!.toLowerCase());
+    const d = new Date(Number(dm[3] ?? now.getFullYear()), month, Number(dm[2]), h, Number(dm[5] ?? 0), 0, 0);
+    if (!dm[3] && d <= now) d.setFullYear(d.getFullYear() + 1);
+    if (!Number.isNaN(d.getTime()) && h <= 23) return d;
   }
   const at = /(?:try again at|resets?(?: at)?|reset at|available at|until)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(text);
   if (at && (at[2] || at[3])) {
