@@ -5,6 +5,7 @@ import { BadRequest } from './store.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
 import type { AgentAdapter, AgentEvent, Invocation } from './adapters/types.ts';
 import { spawnSafe, killTree } from './proc.ts';
+import { effortFlagFor, vendorOf, type Link } from './routing.ts';
 
 export function extractJson(text: string): unknown {
   const fences = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((m) => m[1]!);
@@ -16,18 +17,29 @@ export function extractJson(text: string): unknown {
 }
 
 /** Resolve 'auto' via routing policy and make sure the agent is available and can run read-only. */
-export async function resolveReadOnlyAgent(orch: Orchestrator, provider: string, purpose: string): Promise<{ adapter: AgentAdapter; provider: string }> {
+export async function resolveReadOnlyAgent(orch: Orchestrator, provider: string, purpose: string, auto: { links?: Link[]; avoidVendor?: string } = {}):
+  Promise<{ adapter: AgentAdapter; provider: string; model?: string; effort?: string | null }> {
   const { store, registry } = orch;
+  let link: Link | undefined;
   if (provider === 'auto') {
-    const picked = await registry.pick(orch.routingPolicy, store.getSetting('routingTable', DEFAULT_ROUTING));
-    if (!picked) throw new BadRequest(`no available agent for routing policy '${orch.routingPolicy}'`);
-    provider = picked;
+    const st = await registry.status();
+    const ok = (id: string) => Boolean(st.find((s) => s.id === id)?.available) && registry.get(id)?.capabilities().readOnlyMode === 'supported';
+    link = auto.links?.find((l) => ok(l.agent));
+    if (link) provider = link.agent;
+    else {
+      const table = store.getSetting('routingTable', DEFAULT_ROUTING);
+      const order = table[orch.routingPolicy] ?? [];
+      const other = auto.avoidVendor ? order.filter((id) => vendorOf(id, null) !== auto.avoidVendor) : order;
+      const picked = (await registry.pick(orch.routingPolicy, { ...table, [orch.routingPolicy]: other })) ?? (await registry.pick(orch.routingPolicy, table));
+      if (!picked) throw new BadRequest(`no available agent for routing policy '${orch.routingPolicy}'`);
+      provider = picked;
+    }
   }
   const adapter = registry.get(provider);
   const st = (await registry.status()).find((s) => s.id === provider);
   if (!adapter || !st?.available) throw new BadRequest(`agent '${provider}' unavailable: ${st?.reason ?? 'unknown provider'}`);
   if (!adapter.mock && adapter.capabilities().readOnlyMode !== 'supported') throw new BadRequest(`agent '${provider}' has no read-only mode; it cannot be used as ${purpose}`);
-  return { adapter, provider };
+  return link ? { adapter, provider, model: link.model, effort: effortFlagFor(link) } : { adapter, provider };
 }
 
 export type OneShotResult = { code: number | null; result: AgentEvent | null; messages: string[]; killReason: string | null };

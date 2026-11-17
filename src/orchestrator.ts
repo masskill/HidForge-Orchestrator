@@ -17,7 +17,8 @@ import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } f
 import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
-import { projectCosts } from './costs.ts';
+import { projectCosts, cellStats } from './costs.ts';
+import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_CEILING, DEFAULT_MATRIX, resolveChain, reorderByStats, effortFlagFor, type Effort, type Link, type Matrix } from './routing.ts';
 
 export interface OrchestratorOptions {
   dataDir: string;
@@ -74,6 +75,27 @@ export class Orchestrator {
   /** Explicit per-agent user opt-in to trust HidForge worktrees (Cursor). Off unless the user enabled it. */
   trusts(provider: string): boolean { return this.store.getSetting<Record<string, boolean>>('agentTrust', {})[provider] === true; }
   get routingPolicy(): RoutingPolicy { return this.store.getSetting('routingPolicy', 'balanced' as RoutingPolicy); }
+
+  /** Auto-routing settings (all user-editable in Settings). */
+  routingSettings() {
+    const s = this.store;
+    return {
+      effortCeiling: s.getSetting<Effort>('effortCeiling', DEFAULT_CEILING), allowFable: s.getSetting('allowFable', false), selfLearning: s.getSetting('selfLearning', false),
+      agentReadOnly: s.getSetting<Record<string, boolean>>('agentReadOnly', {}), routingMatrix: { ...DEFAULT_MATRIX, ...s.getSetting<Matrix>('routingMatrix', {}) },
+    };
+  }
+  /** Agents the user marked as unable to write files right now. */
+  readOnlyAgents(): Set<string> { const r = this.routingSettings().agentReadOnly; return new Set(Object.keys(r).filter((k) => r[k])); }
+
+  /** Usable links for a category/complexity right now, best first. Empty = nothing from the matrix can run (callers fall back to the provider order). */
+  async chainFor(category: string, complexity: string | null, o: { write: boolean; roleProviders?: string[] }): Promise<Link[]> {
+    const rs = this.routingSettings();
+    const available = new Set((await this.registry.status()).filter((a) => a.available && !a.mock).map((a) => a.id));
+    const cx = complexity ?? 'medium';
+    const chain = resolveChain(category, cx, { matrix: rs.routingMatrix, available, readOnlyAgents: this.readOnlyAgents(), write: o.write,
+      roleProviders: o.roleProviders, ceiling: rs.effortCeiling, allowFable: rs.allowFable });
+    return rs.selfLearning ? reorderByStats(chain, cellStats(this.store, category, cx)) : chain;
+  }
 
   async start(): Promise<void> {
     await this.reviewer.recover(); // first: recover() may re-run gates, which can start fresh reviews
@@ -133,6 +155,8 @@ export class Orchestrator {
     const all = this.store.listTasks(projectId);
     const err = validateDeps(all, -1, deps);
     if (err) throw new BadRequest(err);
+    // Auto-routed tasks get 3 attempts by default so a failure can walk the whole chain (primary, fallback 1, fallback 2).
+    if (clean.provider === 'auto' && clean.maxAttempts === undefined) clean.maxAttempts = 3;
     return this.store.createTask(projectId, { ...clean, title: input.title });
   }
 
@@ -160,6 +184,11 @@ export class Orchestrator {
     if (out.maxAttempts !== undefined) out.maxAttempts = Math.max(1, Math.min(10, Number(out.maxAttempts)));
     if (out.timeoutSec !== undefined) out.timeoutSec = Math.max(5, Number(out.timeoutSec));
     if (out.maxBudgetUsd !== undefined) out.maxBudgetUsd = out.maxBudgetUsd === null || out.maxBudgetUsd === '' ? null : Math.max(0.01, Number(out.maxBudgetUsd)) || null;
+    for (const [k, allowed] of [['category', CATEGORIES], ['complexity', COMPLEXITIES], ['effort', EFFORTS]] as const) {
+      if (out[k] === undefined) continue;
+      if (out[k] === null || out[k] === '') out[k] = null;
+      else if (!(allowed as readonly string[]).includes(String(out[k]))) throw new BadRequest(`${k} must be one of: ${allowed.join(', ')}`);
+    }
     return out as Partial<Task>;
   }
 
@@ -331,24 +360,41 @@ export class Orchestrator {
   private async startRun(task: Task): Promise<boolean> {
     let t = task;
     const tpl = roleTemplate(this.roleTemplates(), t.assignedRole);
+// What this run will use. For 'auto' with a category: link N of the routing chain for attempt N (escalation = another model/vendor,
+    // never more effort); the task itself stays 'auto'. Without a category: the first available agent in the provider order.
+    let used: { provider: string; model: string | null; effort: string | null; flag: string | null } = { provider: t.provider, model: t.model, effort: t.effort, flag: t.effort };
     if (t.provider === 'auto') {
-      const table = this.store.getSetting('routingTable', DEFAULT_ROUTING);
-      const order = tpl.providers.length ? [...table[this.routingPolicy].filter((p) => tpl.providers.includes(p)), ...tpl.providers.filter((p) => !table[this.routingPolicy].includes(p))] : table[this.routingPolicy];
-      const picked = await this.registry.pick(this.routingPolicy, { ...table, [this.routingPolicy]: order });
-      if (!picked) { this.failTask(t, `no available agent for routing policy '${this.routingPolicy}'${tpl.providers.length ? ` among agents allowed for role ${t.assignedRole} (${tpl.providers.join(', ')})` : ''}`); return false; }
-      t = this.store.patchTask(t.id, { provider: picked });
-      this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: picked, policy: this.routingPolicy } });
+      const write = t.policy !== 'read-only' && !tpl.readOnly;
+      const chain = t.category ? await this.chainFor(t.category, t.complexity, { write, roleProviders: tpl.providers }) : [];
+      if (chain.length) {
+        const i = Math.min(t.attempts, chain.length - 1);
+        const l = chain[i]!;
+        const flag = effortFlagFor(l) === null ? null : (t.effort ?? l.effort); // an effort the human wrote into the task wins over the table
+        used = { provider: l.agent, model: l.model, effort: flag ?? l.effort, flag };
+        this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: l.agent, model: l.model, effort: used.effort,
+          category: t.category, complexity: t.complexity ?? 'medium', link: i + 1, of: chain.length, reason: i ? `attempt ${t.attempts + 1}: escalated to link ${i + 1}` : 'primary link' } });
+      } else {
+        const table = this.store.getSetting('routingTable', DEFAULT_ROUTING);
+        const ro = write ? this.readOnlyAgents() : new Set<string>();
+        const base = table[this.routingPolicy].filter((x) => !ro.has(x));
+        const order = tpl.providers.length ? [...base.filter((x) => tpl.providers.includes(x)), ...tpl.providers.filter((x) => !base.includes(x) && !ro.has(x))] : base;
+        const picked = await this.registry.pick(this.routingPolicy, { ...table, [this.routingPolicy]: order });
+        if (!picked) { this.failTask(t, `no available agent for routing policy '${this.routingPolicy}'${tpl.providers.length ? ` among agents allowed for role ${t.assignedRole} (${tpl.providers.join(', ')})` : ''}`); return false; }
+        t = this.store.patchTask(t.id, { provider: picked });
+        used = { ...used, provider: picked };
+        this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: picked, policy: this.routingPolicy } });
+      }
     }
-    if (tpl.providers.length && !tpl.providers.includes(t.provider)) { this.failTask(t, `role ${t.assignedRole} may only use: ${tpl.providers.join(', ')} (task asks for ${t.provider})`); return false; }
+    if (tpl.providers.length && !tpl.providers.includes(used.provider)) { this.failTask(t, `role ${t.assignedRole} may only use: ${tpl.providers.join(', ')} (task asks for ${used.provider})`); return false; }
     if (tpl.readOnly && t.policy !== 'read-only') {
       t = this.store.patchTask(t.id, { policy: 'read-only' });
       this.store.addEvidence(t.id, { kind: 'scheduler', ok: true, summary: `Role ${t.assignedRole} is read-only by its template: task policy set to read-only` });
     }
-    const adapter = this.registry.get(t.provider);
-    const st = (await this.registry.status()).find((s) => s.id === t.provider);
-    if (!adapter || !st?.available) { this.failTask(t, `agent '${t.provider}' unavailable: ${st?.reason ?? 'unknown provider'}`); return false; }
+    const adapter = this.registry.get(used.provider);
+    const st = (await this.registry.status()).find((s) => s.id === used.provider);
+    if (!adapter || !st?.available) { this.failTask(t, `agent '${used.provider}' unavailable: ${st?.reason ?? 'unknown provider'}`); return false; }
     if (t.policy === 'read-only' && adapter.capabilities().readOnlyMode !== 'supported' && !adapter.mock) {
-      this.failTask(t, `agent '${t.provider}' has no read-only mode`); return false;
+      this.failTask(t, `agent '${used.provider}' has no read-only mode`); return false;
     }
 
     const p = this.store.getProject(t.projectId);
@@ -364,13 +410,13 @@ export class Orchestrator {
     if (t.artifacts.needsRebase) t = await this.rebaseOntoBase(t, p);
 
     let run: Run;
-    try { run = this.store.beginRun(t, w.workspace, adapter.mock); }
+    try { run = this.store.beginRun(t, w.workspace, adapter.mock, used); }
     catch (e) { if (e instanceof Conflict) return false; throw e; }
 
     const prompt = buildPrompt(t, p, run.attempt, tpl);
-    const inv = adapter.buildInvocation({ prompt, workspace: w.workspace, model: t.model, policy: t.policy, maxBudgetUsd: t.maxBudgetUsd, trustWorkspace: this.trusts(t.provider) });
+    const inv = adapter.buildInvocation({ prompt, workspace: w.workspace, model: used.model, effort: used.flag, policy: t.policy, maxBudgetUsd: t.maxBudgetUsd, trustWorkspace: this.trusts(used.provider) });
     this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.started',
-      data: { attempt: run.attempt, provider: t.provider, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });
+      data: { attempt: run.attempt, provider: used.provider, model: used.model, effort: used.effort, mock: adapter.mock, command: inv.command, args: inv.args.map((a) => (a.length > 200 ? a.slice(0, 200) + '…' : a)) } });
 
     if (!adapter.prepare) return this.spawnRun(t, p, run, w.workspace, adapter, inv);
     // Remote upload runs off the tick so the scheduler and timeout checks keep going; cancel/stop abort it.

@@ -18,7 +18,7 @@ export interface EventRule {
 }
 export interface PluginSpec {
   id: string; name: string; bin: string; verified?: boolean; notes?: string[];
-  args: { base?: string[]; write?: string[]; readOnly?: string[]; model?: string[] };
+  args: { base?: string[]; write?: string[]; readOnly?: string[]; model?: string[]; effort?: string[] };
   /** `args`: a command whose exit code 0 means logged in. `files` (relative to the home dir) / `env`: logged in if any exists or is set; only existence is checked, contents are never read. */
   auth?: { args?: string[]; files?: string[]; env?: string[]; hint?: string };
   models?: { args: string[]; pattern: string };
@@ -51,7 +51,7 @@ export function validatePlugin(raw: unknown): PluginSpec {
   if (BUILTIN_IDS.includes(s.id)) fail(`id "${s.id}" is reserved for a built-in adapter`);
   if (typeof s.name !== 'string' || !s.name.trim()) fail('name is required');
   if (typeof s.bin !== 'string' || !/^[\w.-]+$/.test(s.bin)) fail('bin must be a bare command name resolved via PATH (no paths, no spaces)');
-  const lists: [string, unknown][] = [['args.base', s.args?.base], ['args.write', s.args?.write], ['args.readOnly', s.args?.readOnly], ['args.model', s.args?.model], ['auth.args', s.auth?.args], ['models.args', s.models?.args]];
+  const lists: [string, unknown][] = [['args.base', s.args?.base], ['args.write', s.args?.write], ['args.readOnly', s.args?.readOnly], ['args.model', s.args?.model], ['args.effort', s.args?.effort], ['auth.args', s.auth?.args], ['models.args', s.models?.args]];
   for (const [where, l] of lists) {
     if (l === undefined) continue;
     if (!Array.isArray(l) || l.some((a) => typeof a !== 'string')) fail(`${where} must be an array of strings`);
@@ -99,7 +99,8 @@ export function pluginAdapter(s: PluginSpec): CliAdapter {
     },
     build: (c) => ({
       args: [...(s.args.base ?? []), ...((c.policy === 'read-only' ? s.args.readOnly : s.args.write) ?? []),
-        ...(c.model && s.args.model ? s.args.model.map((a) => a.replaceAll('{model}', c.model!)) : [])],
+        ...(c.model && s.args.model ? s.args.model.map((a) => a.replaceAll('{model}', c.model!)) : []),
+        ...(c.effort && s.args.effort ? s.args.effort.map((a) => a.replaceAll('{effort}', c.effort!)) : [])],
       stdin: c.prompt,
     }),
     parse: (o) => parseWith(s.events, o),

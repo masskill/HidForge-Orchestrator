@@ -1,6 +1,7 @@
 // Declarative adapters for real CLIs. Flags were checked against local `--help` output
 // (claude 2.1.325, codex-cli 0.153.4, agy 1.5.9, cursor-agent 2026.11.05) and recorded stream fixtures in open-mercato/cezar (MIT).
-// No permission-bypass flag is ever emitted.
+// No permission-bypass flag is ever emitted. Reasoning effort: `claude --effort`, `codex -c model_reasoning_effort=` (checked 2026-11-17);
+// agy and Cursor carry the level in the model id, so no flag is added for them.
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { run, resolveCommand } from '../proc.ts';
@@ -73,7 +74,7 @@ export const CLAUDE: CliSpec = {
   notes: ['Runs `claude -p --output-format stream-json --permission-mode acceptEdits|plan`; shell commands are not pre-approved, so they are denied headlessly. Verification is done by HidForge gates.'],
   build: (c) => ({
     args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', c.policy === 'read-only' ? 'plan' : 'acceptEdits', ...(c.model ? ['--model', c.model] : []),
-      ...(c.maxBudgetUsd ? ['--max-budget-usd', String(c.maxBudgetUsd)] : [])],
+      ...(c.effort ? ['--effort', c.effort] : []), ...(c.maxBudgetUsd ? ['--max-budget-usd', String(c.maxBudgetUsd)] : [])],
     stdin: c.prompt,
   }),
   parse: parseClaudeLike,
@@ -118,7 +119,8 @@ export const CODEX: CliSpec = {
     } catch { return []; }
   },
   build: (c) => ({
-    args: ['exec', '--json', '--color', 'never', '--sandbox', c.policy === 'read-only' ? 'read-only' : 'workspace-write', '--cd', c.workspace, ...(c.model ? ['--model', c.model] : []), '-'],
+    args: ['exec', '--json', '--color', 'never', '--sandbox', c.policy === 'read-only' ? 'read-only' : 'workspace-write', '--cd', c.workspace, ...(c.model ? ['--model', c.model] : []),
+      ...(c.effort ? ['-c', `model_reasoning_effort=${c.effort}`] : []), '-'],
     stdin: c.prompt,
   }),
   parse(o) {

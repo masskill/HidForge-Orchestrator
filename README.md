@@ -8,7 +8,7 @@ You describe a goal. HidForge turns it into a graph of tasks (DAG) and runs seve
 
 Everything runs on your own computer. HidForge uses the CLIs you have already installed and signed in to — it never asks for, stores or forwards API keys, tokens or cookies.
 
-> **Status: v0.5 (beta).** Overall progress is 96% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
+> **Status: v0.5 (beta).** Overall progress is 94% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
 
 ---
 
@@ -200,6 +200,7 @@ The project documents are in Ukrainian.
 - [ADR-001](docs/ADR-001-architecture.md) — architecture decision
 - [SECURITY](docs/SECURITY.md) — policies and threat model
 - [ROADMAP](docs/ROADMAP.md) — stages and progress
+- [ROUTING](docs/ROUTING.md) — automatic choice of agent, model and effort (priority table, rules)
 - [TEST_REPORT](docs/TEST_REPORT.md) — what was verified and how
 - [DESIGN_SYSTEM](docs/DESIGN_SYSTEM.md) — UI tokens and components
 - [UPSTREAM_AUDIT](docs/UPSTREAM_AUDIT.md) — audit of upstream projects

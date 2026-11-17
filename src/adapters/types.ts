@@ -42,6 +42,7 @@ export interface Invocation {
 export interface StartContext {
   prompt: string; workspace: string; model: string | null; policy: Policy;
   maxBudgetUsd?: number | null;  // passed only to CLIs with a native spend cap (claude --max-budget-usd)
+  effort?: string | null;        // reasoning effort; passed only to CLIs with an effort flag (claude --effort, codex -c model_reasoning_effort)
   trustWorkspace?: boolean;      // explicit user opt-in per agent (Cursor workspace trust); never on by default
 }
 export interface ModelInfo { id: string; label: string }

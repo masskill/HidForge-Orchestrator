@@ -8,6 +8,7 @@ import type { AgentAdapter } from './adapters/types.ts';
 import { cleanModel } from './contract.ts';
 import { killTree, isAlive, maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
+import { reviewLinks, usable, vendorOf, type Effort } from './routing.ts';
 
 export const REVIEW_HEADER = '# Code review request — HidForge';
 export const REVIEW_ROLE = 'QA + Security Reviewer';
@@ -24,7 +25,7 @@ export interface ReviewDoc { verdict: Verdict; summary: string; findings: Findin
 /** Stored in task.artifacts.aiReview. */
 export interface AiReview {
   status: 'running' | 'succeeded' | 'failed' | 'canceled';
-  attempt: number; provider: string; model: string | null; pid: number | null; at: string;
+  attempt: number; provider: string; model: string | null; effort?: string | null; pid: number | null; at: string;
   verdict?: Verdict; summary?: string; findings?: Finding[]; error?: string; usage?: unknown;
 }
 
@@ -192,29 +193,39 @@ export class Reviewer {
     const pol = p.reviewPolicy;
     this.active.add(taskId);
     try {
-      const { adapter, provider } = await resolveReadOnlyAgent(this.orch, o.provider ?? pol.provider, 'reviewer');
-      const model = o.model !== undefined ? cleanModel(o.model) : pol.model;
+      // 'auto': the reviewer must come from another vendor than the author of the code (the last real run of this task).
+      const want = o.provider ?? pol.provider;
+      const author = store.runsForTask(taskId).findLast((r) => r.status === 'succeeded');
+      const authorVendor = author && !author.isMock ? vendorOf(author.provider, author.model) : undefined;
+      let links = want === 'auto' && authorVendor ? reviewLinks(authorVendor, t.complexity) : [];
+      if (links.length) {
+        const rs = this.orch.routingSettings();
+        const available = new Set((await this.orch.registry.status()).filter((a) => a.available).map((a) => a.id));
+        links = links.filter((l) => usable(l, { available, write: false, ceiling: rs.effortCeiling as Effort }));
+      }
+      const { adapter, provider, model: linkModel, effort } = await resolveReadOnlyAgent(this.orch, want, 'reviewer', { links, avoidVendor: authorVendor });
+      const model = o.model !== undefined ? cleanModel(o.model) : (want === 'auto' && linkModel ? linkModel : pol.model);
       t = store.getTask(taskId);
       if (t.status !== 'review') throw new Conflict(`task is ${t.status}`);
-      t = this.save(taskId, { status: 'running', attempt: t.attempts, provider, model, pid: null, at: new Date().toISOString() });
-      store.event({ projectId: p.id, taskId, type: 'review.started', data: { provider, model, mock: adapter.mock, attempt: t.attempts } });
-      void this.orch.track(this.launch(t, p, adapter, provider, model).finally(() => this.active.delete(taskId)));
+      t = this.save(taskId, { status: 'running', attempt: t.attempts, provider, model, effort: effort ?? null, pid: null, at: new Date().toISOString() });
+      store.event({ projectId: p.id, taskId, type: 'review.started', data: { provider, model, effort: effort ?? null, authorVendor: authorVendor ?? null, mock: adapter.mock, attempt: t.attempts } });
+      void this.orch.track(this.launch(t, p, adapter, provider, model, effort ?? null).finally(() => this.active.delete(taskId)));
       return t;
     } catch (e) { this.active.delete(taskId); throw e; }
   }
 
-  private async launch(t: Task, p: Project, adapter: AgentAdapter, provider: string, model: string | null): Promise<void> {
+  private async launch(t: Task, p: Project, adapter: AgentAdapter, provider: string, model: string | null, effort: string | null = null): Promise<void> {
     const { store, ws } = this.orch;
     const attempt = t.attempts;
     const dir = path.join(this.orch.opts.dataDir, 'reviewing', `p${p.id}-t${t.id}-a${attempt}-${Date.now()}`);
-    const base: AiReview = { status: 'running', attempt, provider, model, pid: null, at: new Date().toISOString() };
+    const base: AiReview = { status: 'running', attempt, provider, model, effort, pid: null, at: new Date().toISOString() };
     const out: string[] = [];
     let session: OneShot | null = null;
     try {
       await ws.addDetached(p.repoPath, t.branch!, dir);
       const files = await ws.changedFiles(dir, t.baseCommit!);
       const diff = maskSecrets(await ws.diff(dir, t.baseCommit!));
-      const inv = adapter.buildInvocation({ prompt: buildReviewPrompt(t, p, attempt, diff, files), workspace: dir, model, policy: 'read-only', trustWorkspace: this.orch.trusts(provider) });
+      const inv = adapter.buildInvocation({ prompt: buildReviewPrompt(t, p, attempt, diff, files), workspace: dir, model, effort, policy: 'read-only', trustWorkspace: this.orch.trusts(provider) });
       session = runOnce(adapter, inv, dir, {
         timeoutMs: Math.max(t.timeoutSec, 300) * 1000, stallMs: this.orch.opts.stallTimeoutSec * 1000,
         onEvent: (ev, stream) => {
@@ -256,6 +267,7 @@ export class Reviewer {
     if (cur && cur.attempt !== r.attempt) return; // a newer attempt owns the review slot
     r.at = new Date().toISOString();
     this.save(taskId, r);
+    if (r.status === 'succeeded' && r.verdict) store.setRunVerdict(taskId, r.attempt, r.verdict);
     const counts = (r.findings ?? []).reduce<Record<string, number>>((a, f) => ({ ...a, [f.severity]: (a[f.severity] ?? 0) + 1 }), {});
     const detail = r.status === 'succeeded'
       ? [r.summary, ...(r.findings ?? []).map((f) => `[${f.severity}] ${f.file}${f.line ? `:${f.line}` : ''} — ${f.message}`)].join(NL) : r.error;

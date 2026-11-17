@@ -25,10 +25,17 @@ const PAGES = [
   { id: 'agents', label: 'Агенти', icon: 'agents' },
   { id: 'activity', label: 'Журнал подій', icon: 'activity' },
   { id: 'costs', label: 'Витрати', icon: 'costs' },
+  { id: 'models', label: 'Аналітика моделей', icon: 'overview' },
   { id: 'reports', label: 'Звіти й рішення', icon: 'report' },
   { id: 'system', label: 'Система', icon: 'system' },
   { id: 'settings', label: 'Налаштування', icon: 'settings' },
 ];
+const CATEGORY_LABEL = { ui_visual: 'Візуал / UI', frontend_logic: 'Логіка фронтенду', backend: 'Бекенд', bugfix: 'Виправлення помилки', refactor: 'Рефакторинг',
+  architecture: 'Архітектура', tests: 'Тести', docs: 'Документація', small_edit: 'Дрібна правка', planning: 'Планування' };
+const COMPLEXITY_LABEL = { low: 'проста', medium: 'середня', high: 'складна' };
+const EFFORT_LABEL = { low: 'низькі', medium: 'середні', high: 'високі', xhigh: 'надвисокі — швидко витрачають ліміти', max: 'максимальні — швидко витрачають ліміти' };
+const kindLabel = (t) => (t.category ? `${CATEGORY_LABEL[t.category] || t.category} · ${COMPLEXITY_LABEL[t.complexity || 'medium']}` : null);
+const linkText = (l) => [l.agent, l.model, l.effort].filter(Boolean).join(' ');
 const ACTIVE = ['queued', 'running', 'ready'];
 const ATTENTION = ['review', 'needs_user_input'];
 const PROBLEM = ['failed', 'blocked'];
@@ -167,7 +174,7 @@ function render() {
   const needsProject = ['overview', 'tasks', 'planner', 'activity', 'costs', 'reports'].includes(state.page);
   if (needsProject && !state.project) { pg.replaceChildren(noProject()); return; }
   ({ projects: projectsPage, overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage,
-    activity: activityPage, costs: costsPage, reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
+    activity: activityPage, costs: costsPage, models: modelsPage, reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
 }
 const noProject = () => PanelCard({}, EmptyState({ icon: 'folder', title: 'Проєкт не відкрито',
   text: 'Відкрийте локальний Git-репозиторій або створіть демо-проєкт, щоб планувати й запускати задачі агентів.',
@@ -387,11 +394,11 @@ function activitySummary(e) {
     case 'task.created': return `Створено задачу${d.title ? ` «${d.title}»` : ''}`;
     case 'task.deleted': return withNote('Задачу видалено');
     case 'task.status': return withNote(`статус → ${STATUS_LABEL[d.to] || d.to || 'невідомий'}`);
-    case 'task.routed': return withNote(`Призначено агенту: ${d.provider || d.to || 'автовибір'}`);
+    case 'task.routed': return withNote(`Призначено: ${[d.provider || d.to || 'автовибір', d.model, d.effort].filter(Boolean).join(' · ')}${d.link ? ` (ланка ${d.link} з ${d.of})` : ''}`);
     case 'task.evidence': return withNote(d.summary || 'Додано результати перевірки');
-    case 'run.started': return `Агент: ${d.provider || d.command?.split(/[\\/]/).pop() || 'невідомий'} · спроба #${d.attempt ?? '—'}`;
+    case 'run.started': return `Агент: ${[d.provider || d.command?.split(/[\\/]/).pop() || 'невідомий', d.model, d.effort].filter(Boolean).join(' · ')} · спроба #${d.attempt ?? '—'}`;
     case 'run.recovered': return withNote('Відновлено перерваний запуск');
-    case 'review.started': return `Рецензент: ${d.provider || 'невідомий'} · спроба #${d.attempt ?? '—'}`;
+    case 'review.started': return `Рецензент: ${[d.provider || 'невідомий', d.model, d.effort].filter(Boolean).join(' · ')} · спроба #${d.attempt ?? '—'}`;
     case 'review.status': return withNote(`Рецензія: ${d.status || 'оновлено'}${d.verdict ? ` · ${d.verdict}` : ''}`);
     case 'plan.started': return `Планер: ${d.provider || 'автовибір'}`;
     case 'plan.status': return withNote(`План: ${d.status || 'оновлено'}`);
@@ -602,6 +609,42 @@ function costsPage() {
   );
 }
 
+// ---------------------------------------------------------------- page: model analytics
+async function modelsPage() {
+  const header = PageHeader({ title: 'Аналітика моделей', subtitle: 'Власні виміри HidForge: як кожна зв’язка «агент · модель · зусилля» впоралася із задачами кожного типу',
+    actions: SecondaryButton({ icon: 'refresh', onClick: () => render() }, 'Оновити') });
+  mount(header, PanelCard({}, EmptyState({ icon: 'refresh', title: 'Завантаження…', text: 'Рахуємо статистику запусків.' })));
+  let rows;
+  try { rows = await api('GET', '/api/model-stats'); } catch (e) { toast(e.message, 'danger'); return; }
+  if (state.page !== 'models') return;
+  const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  const order = Object.keys(CATEGORY_LABEL);
+  rows.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || a.complexity.localeCompare(b.complexity) || b.runs - a.runs);
+  const total = rows.reduce((n, r) => n + r.runs, 0);
+  mount(header,
+    h('div', { class: 'grid stats' },
+      StatCard({ label: 'Запусків враховано', value: total }),
+      StatCard({ label: 'Зв’язок «модель · зусилля»', value: rows.length }),
+      StatCard({ label: 'Самонавчання', value: state.settings?.selfLearning ? 'увімкнено' : 'вимкнено' })),
+    rows.length ? PanelCard({ flush: true, title: 'Результати за типом задачі', subtitle: 'Усі проєкти; демо-агент, скасовані й перервані запуски не враховуються' },
+      Table({ columns: [
+        { label: 'Тип', render: (r) => h('strong', {}, CATEGORY_LABEL[r.category] || r.category) },
+        { label: 'Складність', render: (r) => COMPLEXITY_LABEL[r.complexity] || r.complexity },
+        { label: 'Агент · модель · зусилля', class: 'grow', render: (r) => h('span', { class: 'mono' }, [r.agent, r.model, r.effort].filter(Boolean).join(' · ')) },
+        { label: 'Запусків', render: (r) => r.runs },
+        { label: 'Успішних', render: (r) => Badge(pct(r.succeeded, r.runs), r.succeeded / r.runs >= 0.8 ? 'success' : r.succeeded / r.runs >= 0.5 ? 'warning' : 'danger') },
+        { label: 'З першої спроби', render: (r) => pct(r.firstTry, r.firstTryRuns) },
+        { label: 'Рецензій «схвалено»', render: (r) => (r.reviewed ? `${r.approved} з ${r.reviewed}` : '—') },
+        { label: 'Сер. час', render: (r) => `${Math.round(r.avgSec)} с` },
+        { label: 'Токени', render: (r) => (r.inputTokens + r.outputTokens).toLocaleString('uk-UA') },
+        { label: 'USD', render: (r) => (r.runsWithUsd ? usd(r.usd) : '—') },
+      ], rows }))
+      : PanelCard({}, EmptyState({ icon: 'overview', title: 'Вимірів ще немає', text: 'Статистика з’явиться після запусків задач із заданим типом. Доти діє таблиця пріоритетів із досліджень (Налаштування → Автовибір моделі).' })),
+    h('p', { class: 'text-2', style: 'margin:0' },
+      '«Успішний» запуск — агент завершив роботу без помилки; чи пройшла робота перевірки, показує колонка рецензій. USD звітує лише Claude Code. Кілька запусків — це ще не висновок: порівнюйте зв’язки, коли в кожної є хоча б 5 запусків.'),
+  );
+}
+
 // ---------------------------------------------------------------- page: reports
 /** Save Markdown as a file without interpreting it as HTML. */
 function downloadMarkdown(markdown, filename) {
@@ -749,7 +792,8 @@ function quickActions(t) {
 
 function taskForm(t) {
   const isNew = !t;
-  t = t || { title: '', description: '', acceptanceCriteria: '', dependsOn: [], assignedRole: 'Backend', provider: usesMock() ? 'mock' : 'auto', model: '', policy: 'workspace-write', allowedPaths: [], verifyCommands: [], maxAttempts: 2, timeoutSec: 1800 };
+  t = t || { title: '', description: '', acceptanceCriteria: '', dependsOn: [], assignedRole: 'Backend', provider: usesMock() ? 'mock' : 'auto', model: '', policy: 'workspace-write', allowedPaths: [], verifyCommands: [], maxAttempts: usesMock() ? 2 : 3, timeoutSec: 1800,
+    category: usesMock() ? null : 'backend', complexity: 'medium', effort: null };
   const f = {
     title: TextInput({ value: t.title, required: true }),
     description: Textarea(t.description, { class: 'prose', style: 'min-height:110px' }),
@@ -757,6 +801,9 @@ function taskForm(t) {
     assignedRole: Select(ROLES, t.assignedRole),
     provider: Select([['auto', 'auto (за політикою)'], ...agentList().map((a) => [a.id, `${a.id}${a.available ? '' : ' (недоступний)'}`])], t.provider),
     model: null,
+    category: Select([['', 'не задано'], ...Object.entries(CATEGORY_LABEL)], t.category || ''),
+    complexity: Select(Object.entries(COMPLEXITY_LABEL), t.complexity || 'medium'),
+    effort: Select([['', 'авто (з таблиці пріоритетів)'], ...Object.entries(EFFORT_LABEL)], t.effort || ''),
     maxBudgetUsd: TextInput({ type: 'number', min: 0.01, step: 0.01, value: t.maxBudgetUsd ?? '', placeholder: 'без ліміту' }),
     policy: Select([['workspace-write', 'запис у worktree'], ['read-only', 'лише читання']], t.policy),
     dependsOn: TextInput({ value: t.dependsOn.join(', '), placeholder: 'напр. 1, 2' }),
@@ -774,7 +821,8 @@ function taskForm(t) {
       const body = {
         title: f.title.value.trim(), description: f.description.value, acceptanceCriteria: f.acceptanceCriteria.value,
         dependsOn: f.dependsOn.value.split(/[\s,#]+/).filter(Boolean).map(Number), assignedRole: f.assignedRole.value,
-        provider: f.provider.value, model: modelValue(f.model), policy: f.policy.value, maxBudgetUsd: f.maxBudgetUsd.value ? Number(f.maxBudgetUsd.value) : null,
+        provider: f.provider.value, model: modelValue(f.model), policy: f.policy.value,
+        category: f.category.value || null, complexity: f.complexity.value, effort: f.effort.value || null, maxBudgetUsd: f.maxBudgetUsd.value ? Number(f.maxBudgetUsd.value) : null,
         allowedPaths: lines(f.allowedPaths), verifyCommands: lines(f.verifyCommands),
         maxAttempts: Number(f.maxAttempts.value), timeoutSec: Number(f.timeoutSec.value),
       };
@@ -785,8 +833,10 @@ function taskForm(t) {
       Field('Назва', f.title, null, { full: true }),
       Field('Опис / інструкції агенту', f.description, null, { full: true }),
       Field('Критерії готовності', f.acceptanceCriteria, null, { full: true }),
-      Field('Роль', f.assignedRole), Field('Виконавець (CLI)', f.provider, '«auto» — за політикою автовибору'),
-      Field('Модель', f.model), Field('Права', f.policy),
+      Field('Роль', f.assignedRole), Field('Виконавець (CLI)', f.provider, '«auto» — агент, модель і зусилля беруться з таблиці пріоритетів за типом і складністю'),
+      Field('Тип задачі', f.category, 'для «auto»; без типу — простий автовибір агента'), Field('Складність', f.complexity),
+      Field('Модель', f.model, 'для «auto» з типом модель вибирає таблиця'), Field('Зусилля', f.effort, 'вище «високих» — лише свідомо: ліміти витрачаються в рази швидше'),
+      Field('Права', f.policy),
       Field('Залежить від', f.dependsOn, '#id через кому'), Field('Макс. спроб', f.maxAttempts),
       Field('Таймаут, с', f.timeoutSec), Field('Ліміт витрат, $', f.maxBudgetUsd, 'передається лише CLI з власним лімітом (Claude Code)'),
       Field('Дозволені шляхи', f.allowedPaths, 'glob по рядку; порожньо = будь-які', { full: true }),
@@ -831,7 +881,7 @@ async function renderDetail() {
       h('div', { class: 'wrap' }, h('div', { class: 'row' }, h('span', { class: 'id', style: 'font-size:var(--fs-xl)' }, `#${t.id}`), StatusBadge(t.status)),
         h('h3', { style: 'margin-top:6px' }, t.title)),
       h('div', { class: 'row' }, menu.querySelector('button') ? menu : null, IconButton({ icon: 'close', label: 'Закрити', size: 'sm', onClick: () => go('#/tasks') }))),
-    h('div', { class: 'row text-2', style: 'font-size:var(--fs-sm)' }, t.assignedRole, ' · ', providerLabel(t), t.provider === 'mock' ? ' (не справжній AI)' : '', ` · спроба ${t.attempts}/${t.maxAttempts} · ${t.policy}`),
+    h('div', { class: 'row text-2', style: 'font-size:var(--fs-sm)' }, t.assignedRole, ' · ', providerLabel(t), t.provider === 'mock' ? ' (не справжній AI)' : '', ` · спроба ${t.attempts}/${t.maxAttempts} · ${t.policy}`, kindLabel(t) ? ` · ${kindLabel(t)}` : '', t.effort ? ` · зусилля: ${t.effort}` : ''),
     t.question ? h('div', { class: 'callout' }, h('div', { class: 'row' }, icon('alert'), h('strong', {}, 'Агент чекає на рішення')), h('div', { class: 'wrap' }, t.question),
       h('div', { class: 'row' }, PrimaryButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: true })) }, 'Дозволити'),
         DangerButton({ size: 'sm', onClick: act(() => taskAction(t.id, 'answer', { allow: false })) }, 'Заборонити'))) : null,
@@ -847,7 +897,7 @@ async function renderDetail() {
       { id: 'review', label: 'AI-рецензія', count: rv?.findings?.length || null, content: reviewPanel(t, rv) },
       { id: 'diff', label: 'Зміни', content: [h('div', {}, GhostButton({ size: 'sm', icon: 'refresh', onClick: loadDiff }, 'Оновити diff')), diffBox] },
       { id: 'runs', label: 'Запуски', count: runs.length, content: runs.length ? h('ul', { class: 'evidence' }, ...runs.map((r) => h('li', {},
-        h('div', { class: 'row between' }, h('span', {}, h('span', { class: 'id' }, `#${r.attempt}`), ` ${r.provider}`, r.isMock ? h('span', { class: 'mockflag' }, ' MOCK') : null), h('span', { class: 'muted mono' }, `${r.startedAt.slice(11, 19)}${r.endedAt ? '–' + r.endedAt.slice(11, 19) : ''}`)),
+        h('div', { class: 'row between' }, h('span', {}, h('span', { class: 'id' }, `#${r.attempt}`), ` ${[r.provider, r.model, r.effort].filter(Boolean).join(' · ')}`, r.isMock ? h('span', { class: 'mockflag' }, ' MOCK') : null), h('span', { class: 'muted mono' }, `${r.startedAt.slice(11, 19)}${r.endedAt ? '–' + r.endedAt.slice(11, 19) : ''}`)),
         h('div', { class: 'text-2' }, r.status, r.exitCode != null ? ` · exit ${r.exitCode}` : ''),
         r.error ? h('div', { class: 'muted' }, r.error) : null,
         r.usage ? h('div', { class: 'muted mono' }, 'usage: ' + JSON.stringify(r.usage)) : null))) : h('p', { class: 'muted' }, 'Запусків ще не було') },
@@ -855,7 +905,7 @@ async function renderDetail() {
         ['Опис', h('div', { style: 'white-space:pre-wrap' }, t.description || '—')], ['Критерії', h('div', { style: 'white-space:pre-wrap' }, t.acceptanceCriteria || '—')],
         ['Залежить від', t.dependsOn.map((d) => `#${d}`).join(', ') || '—'], ['Дозволені шляхи', t.allowedPaths.join(', ') || 'будь-які'],
         ['Перевірка', t.verifyCommands.join('; ') || '—'], ['Гілка', t.branch ? h('code', {}, t.branch) : '—'], ['Worktree', t.workspace ? h('span', { class: 'mono' }, t.workspace) : '—'],
-        ['Таймаут', `${t.timeoutSec} с`]]) },
+        ['Тип і складність', kindLabel(t) || 'не задано'], ['Таймаут', `${t.timeoutSec} с`]]) },
     ], state.detailTab, (id) => { state.detailTab = id; if (id === 'diff') loadDiff(); }),
   ));
   const evs = await api('GET', `/api/events?taskId=${t.id}`);
@@ -973,6 +1023,7 @@ function planResult(plan) {
         { label: 'Ключ', render: (t) => h('code', {}, t.key) },
         { label: 'Задача', class: 'grow', render: (t) => h('span', { title: `${t.description}\n\nКритерії: ${t.acceptanceCriteria}` }, t.title, t.policy === 'read-only' ? h('span', { class: 'muted' }, ' (read-only)') : null) },
         { label: 'Роль', render: (t) => t.role },
+        { label: 'Тип · складність', render: (t) => kindLabel(t) || '—' },
         { label: 'Залежить від', render: (t) => (t.dependsOn.length ? t.dependsOn.map((x) => (typeof x === 'number' ? `#${x}` : x)).join(', ') : '—') },
         { label: 'Шляхи', render: (t) => h('span', { class: 'mono' }, t.allowedPaths.join(', ') || 'будь-які') },
         { label: 'Перевірка', render: (t) => h('span', { class: 'mono' }, t.verifyCommands.join('; ') || '—') },
@@ -1075,6 +1126,7 @@ function settingsPage() {
         Field('Паралельних агентів', maxConc, 'Скільки задач можуть виконуватися одночасно'),
         Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
       PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
+    ...(routingSettings() || []),
     p ? reviewSettings(p) : null,
     rolesSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
@@ -1084,6 +1136,43 @@ function settingsPage() {
         await reloadProject(); toast('Збережено', 'success'); render();
       }) }, 'Зберегти'))) : null,
   );
+}
+/** Auto-routing: effort ceiling, opt-in Fable link, self-learning, agents that cannot write, and the editable priority table. */
+function routingSettings() {
+  const s = state.settings;
+  if (!s?.routing) return null;
+  const put = (body, msg = 'Збережено') => act(async () => { await api('PUT', '/api/settings', body()); await loadSettings(); toast(msg, 'success'); render(); });
+  const ceiling = Select(s.routing.efforts.map((e) => [e, EFFORT_LABEL[e]]), s.effortCeiling, { onchange: (e) => put(() => ({ effortCeiling: e.target.value }))() });
+  const real = (state.agents || []).filter((a) => !a.mock);
+  const parse = (v) => { const [agent, model, effort] = v.trim().split(/\s+/); return agent && model ? { agent, model, effort: effort || null } : null; };
+  const rows = s.routing.categories.flatMap((cat) => s.routing.complexities.map((cx) => {
+    const key = `${cat}/${cx}`;
+    const links = s.routingMatrix[key] || [];
+    return { key, cat, cx, inputs: [0, 1, 2].map((i) => TextInput({ value: links[i] ? linkText(links[i]) : '', class: 'mono', 'aria-label': `${CATEGORY_LABEL[cat]}, ${COMPLEXITY_LABEL[cx]}: ${['головний', 'заміна 1', 'заміна 2'][i]}` })) };
+  }));
+  const save = put(() => ({ routingMatrix: Object.fromEntries(rows.map((r) => [r.key, r.inputs.map((i) => parse(i.value)).filter(Boolean)])) }), 'Таблицю пріоритетів збережено');
+  const reset = act(async () => {
+    if (!await confirmModal('Повернути типову таблицю пріоритетів? Ваші правки таблиці буде втрачено.', { ok: 'Повернути типову' })) return;
+    await api('PUT', '/api/settings', { routingMatrix: null }); await loadSettings(); toast('Типову таблицю відновлено', 'success'); render();
+  });
+  return [
+    PanelCard({ title: 'Автовибір моделі', subtitle: 'Для задач із виконавцем «auto» і заданим типом: агент, модель і зусилля беруться з таблиці пріоритетів' },
+      Field('Стеля зусиль', ceiling, 'Ланки таблиці з вищим рівнем пропускаються. Рівні вище «високих» витрачають ліміти в рази швидше — їх можна вписати лише вручну в окрему задачу.'),
+      Toggle({ label: 'Дозволити Fable 5.2 як останню ланку (лише складні: помилки, архітектура, планування, бекенд)', checked: s.allowFable === true, onChange: (v) => put(() => ({ allowFable: v }))() }),
+      Toggle({ label: 'Самонавчання: коли кожна ланка клітинки має щонайменше 5 власних запусків, порядок ланок ставлять виміри', checked: s.selfLearning === true, onChange: (v) => put(() => ({ selfLearning: v }))() }),
+      real.length ? h('div', { class: 'stack' }, h('div', { class: 'text-2', style: 'font-size:var(--fs-sm)' }, 'Агент зараз не може записувати файли — автовибір не дає йому задач із записом (рецензії й планування лишаються):'),
+        h('div', { class: 'row wrap' }, ...real.map((a) => Toggle({ label: a.id, checked: s.agentReadOnly?.[a.id] === true,
+          onChange: (v) => put(() => ({ agentReadOnly: { ...s.agentReadOnly, [a.id]: v } }))() })))) : null),
+    PanelCard({ flush: true, title: 'Таблиця пріоритетів', subtitle: 'Початкові пріоритети з досліджень (17.11.2026), не виміряно HidForge. Спроба 1 — головний, далі заміни; ескалація — це інша модель, а не більше зусиль' },
+      Table({ columns: [
+        { label: 'Тип', render: (r) => h('strong', {}, CATEGORY_LABEL[r.cat]) },
+        { label: 'Складність', render: (r) => COMPLEXITY_LABEL[r.cx] },
+        { label: 'Головний', render: (r) => r.inputs[0] }, { label: 'Заміна 1', render: (r) => r.inputs[1] }, { label: 'Заміна 2', render: (r) => r.inputs[2] },
+      ], rows }),
+      h('div', { class: 'row', style: 'padding:var(--s-4) var(--s-5);border-top:1px solid var(--border)' },
+        h('span', { class: 'text-2', style: 'flex:1;font-size:var(--fs-sm)' }, 'Формат ланки: «агент модель зусилля», напр. «claude opus high». Порожнє поле — ланки немає. Рецензента вибирає окреме правило: завжди інший вендор, ніж автор коду.'),
+        GhostButton({ onClick: reset }, 'Повернути типову'), PrimaryButton({ icon: 'check', onClick: save }, 'Зберегти таблицю'))),
+  ];
 }
 function budgetSettings(p) {
   const budget = TextInput({ type: 'number', min: 0.01, step: 0.01, value: p.budgetUsd ?? '', placeholder: 'без ліміту' });

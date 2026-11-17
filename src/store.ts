@@ -44,6 +44,8 @@ export interface Task {
   id: number; projectId: number; title: string; description: string; acceptanceCriteria: string;
   dependsOn: number[]; priority: number; assignedRole: string; provider: string; model: string | null;
   policy: Policy; allowedPaths: string[]; verifyCommands: string[]; status: TaskStatus; maxBudgetUsd: number | null;
+  /** Auto-routing inputs (src/routing.ts); effort is an explicit per-task override, null = from the routing chain. */
+  category: string | null; complexity: string | null; effort: string | null;
   attempts: number; maxAttempts: number; timeoutSec: number;
   workspace: string | null; branch: string | null; baseCommit: string | null;
   artifacts: Record<string, unknown>; evidence: Evidence[];
@@ -56,11 +58,13 @@ export interface Run {
   status: 'running' | 'succeeded' | 'failed' | 'timeout' | 'canceled' | 'interrupted';
   exitCode: number | null; error: string | null; usage: unknown; startedAt: string; endedAt: string | null;
   lastOutputAt: string | null;
+  /** What this run actually used; category/complexity are copied from the task at start. */
+  model: string | null; effort: string | null; category: string | null; complexity: string | null; reviewVerdict: string | null;
 }
 
 export interface PlanTask {
   key: string; title: string; description: string; acceptanceCriteria: string; dependsOn: (string | number)[];
-  role: string; allowedPaths: string[]; verifyCommands: string[]; policy: Policy;
+  role: string; allowedPaths: string[]; verifyCommands: string[]; policy: Policy; category?: string; complexity?: string;
 }
 export interface PlanDoc { summary: string; risks: string[]; tasks: PlanTask[] }
 export interface PlanRun {
@@ -96,7 +100,8 @@ function toTask(r: Row): Task {
     timeoutSec: Number(r.timeout_sec), workspace: (r.workspace as string) ?? null, branch: (r.branch as string) ?? null,
     baseCommit: (r.base_commit as string) ?? null, artifacts: pj(r.artifacts, {}), evidence: pj(r.evidence, []),
     question: (r.question as string) ?? null, feedback: (r.feedback as string) ?? null,
-    notBefore: (r.not_before as string) ?? null, maxBudgetUsd: r.max_budget_usd == null ? null : Number(r.max_budget_usd), createdAt: String(r.created_at), updatedAt: String(r.updated_at),
+    notBefore: (r.not_before as string) ?? null, maxBudgetUsd: r.max_budget_usd == null ? null : Number(r.max_budget_usd),
+    category: (r.category as string) ?? null, complexity: (r.complexity as string) ?? null, effort: (r.effort as string) ?? null, createdAt: String(r.created_at), updatedAt: String(r.updated_at),
   };
 }
 
@@ -106,7 +111,8 @@ function toRun(r: Row): Run {
     isMock: Boolean(r.is_mock), pid: r.pid == null ? null : Number(r.pid), status: r.status as Run['status'],
     exitCode: r.exit_code == null ? null : Number(r.exit_code), error: (r.error as string) ?? null,
     usage: pj(r.usage, null), startedAt: String(r.started_at), endedAt: (r.ended_at as string) ?? null,
-    lastOutputAt: (r.last_output_at as string) ?? null,
+    lastOutputAt: (r.last_output_at as string) ?? null, model: (r.model as string) ?? null, effort: (r.effort as string) ?? null,
+    category: (r.category as string) ?? null, complexity: (r.complexity as string) ?? null, reviewVerdict: (r.review_verdict as string) ?? null,
   };
 }
 
@@ -125,10 +131,11 @@ const TASK_COLUMNS: Record<string, string> = {
   allowedPaths: 'allowed_paths', verifyCommands: 'verify_commands', maxAttempts: 'max_attempts', timeoutSec: 'timeout_sec',
   workspace: 'workspace', branch: 'branch', baseCommit: 'base_commit', artifacts: 'artifacts', evidence: 'evidence',
   question: 'question', feedback: 'feedback', notBefore: 'not_before', attempts: 'attempts', maxBudgetUsd: 'max_budget_usd',
+  category: 'category', complexity: 'complexity', effort: 'effort',
 };
 const JSON_FIELDS = new Set(['dependsOn', 'allowedPaths', 'verifyCommands', 'artifacts', 'evidence']);
 export const EDITABLE_FIELDS = ['title', 'description', 'acceptanceCriteria', 'dependsOn', 'priority', 'assignedRole',
-  'provider', 'model', 'policy', 'allowedPaths', 'verifyCommands', 'maxAttempts', 'timeoutSec', 'maxBudgetUsd'] as const;
+  'provider', 'model', 'policy', 'allowedPaths', 'verifyCommands', 'maxAttempts', 'timeoutSec', 'maxBudgetUsd', 'category', 'complexity', 'effort'] as const;
 
 export class Store {
   readonly bus = new EventEmitter();
@@ -232,15 +239,16 @@ export class Store {
 
   // ---- runs & locks
   /** Atomically: take the workspace lock, create the run, mark the task running. Throws Conflict if anything is taken. */
-  beginRun(task: Task, workspace: string, isMock: boolean): Run {
+  beginRun(task: Task, workspace: string, isMock: boolean, used: { provider?: string; model?: string | null; effort?: string | null } = {}): Run {
     return this.tx(() => {
       const cur = this.getTask(task.id);
       if (cur.status !== 'queued') throw new Conflict(`task ${task.id} is ${cur.status}, not queued`);
       const ts = now();
       let run: Row;
       try {
-        run = this.db.prepare(`insert into runs (task_id, attempt, provider, is_mock, status, started_at, last_output_at)
-          values (?,?,?,?, 'running', ?, ?) returning *`).get(task.id, cur.attempts + 1, cur.provider, isMock ? 1 : 0, ts, ts) as Row;
+        run = this.db.prepare(`insert into runs (task_id, attempt, provider, is_mock, status, started_at, last_output_at, model, effort, category, complexity)
+          values (?,?,?,?, 'running', ?, ?, ?,?,?,?) returning *`).get(task.id, cur.attempts + 1, used.provider ?? cur.provider, isMock ? 1 : 0, ts, ts,
+          used.model === undefined ? cur.model : used.model, used.effort === undefined ? cur.effort : used.effort, cur.category, cur.complexity) as Row;
         this.db.prepare('insert into workspace_locks (workspace, run_id, acquired_at) values (?,?,?)').run(workspace, Number(run.id), ts);
       } catch (e) {
         if (String((e as Error).message).includes('UNIQUE')) throw new Conflict(`workspace or task already has an active run: ${workspace}`);
@@ -261,6 +269,14 @@ export class Store {
     const r = this.db.prepare(`update runs set status = ?, exit_code = ?, error = ?, usage = ?, ended_at = ? where id = ? returning *`)
       .get(status, f.exitCode ?? null, f.error ?? null, f.usage === undefined ? null : j(f.usage), now(), runId) as Row;
     return toRun(r);
+  }
+  /** The AI reviewer's verdict on the attempt this run produced (model statistics). */
+  setRunVerdict(taskId: number, attempt: number, verdict: string): void {
+    this.db.prepare('update runs set review_verdict = ? where task_id = ? and attempt = ?').run(verdict, taskId, attempt);
+  }
+  /** Finished real (non-mock) runs that carry a category: the raw data for per-model statistics. */
+  routedRuns(): Run[] {
+    return this.db.prepare(`select * from runs where is_mock = 0 and category is not null and status != 'running' order by id`).all().map((r) => toRun(r as Row));
   }
   getRun(id: number): Run { return toRun(this.db.prepare('select * from runs where id = ?').get(id) as Row); }
   runsForTask(taskId: number): Run[] { return this.db.prepare('select * from runs where task_id = ? order by id').all(taskId).map((r) => toRun(r as Row)); }

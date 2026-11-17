@@ -17,4 +17,4 @@ for (const s of sections) {
 }
 const stages = sections.filter((s) => s.name.startsWith('Етап'));
 const overall = Math.round(stages.reduce((a, s) => a + pct(s.done, s.total), 0) / stages.length);
-console.log(`\nЗагалом по етапах 0–5: ${overall}% готово, ${100 - overall}% лишилось`);
+console.log(`\nЗагалом по етапах 0–6: ${overall}% готово, ${100 - overall}% лишилось`);

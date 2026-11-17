@@ -102,6 +102,10 @@ const MIGRATIONS: string[] = [
   `alter table projects add column review_policy text;`,
   // v4: spend limits (USD): per project (HidForge stops starting runs) and per task (passed to CLIs with a native cap)
   `alter table projects add column budget_usd real; alter table tasks add column max_budget_usd real;`,
+  // v5: auto-routing — task category/complexity/effort; what each run actually used (stats must not depend on later task edits)
+  `alter table tasks add column category text; alter table tasks add column complexity text; alter table tasks add column effort text;
+   alter table runs add column model text; alter table runs add column effort text; alter table runs add column category text;
+   alter table runs add column complexity text; alter table runs add column review_verdict text;`,
 ];
 
 export function openDb(file: string): DatabaseSync {

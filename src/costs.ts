@@ -1,6 +1,7 @@
 // Spend accounting from what the CLIs report: task runs, planner sessions and AI reviews.
 // Only Claude Code reports a dollar cost (total_cost_usd); other CLIs report tokens only.
 import type { Store } from './store.ts';
+import type { LinkStat } from './routing.ts';
 
 export interface ProviderCost { provider: string; sessions: number; usd: number; sessionsWithUsd: number; inputTokens: number; outputTokens: number }
 export interface CostSummary { totalUsd: number; budgetUsd: number | null; remainingUsd: number | null; byProvider: ProviderCost[]; byKind: Record<string, number> }
@@ -56,4 +57,44 @@ export function projectRuns(store: Store, projectId: number, f: { before?: numbe
       exitCode: r.exitCode, error: r.error, startedAt: r.startedAt, endedAt: r.endedAt,
       durationMs: Number.isFinite(end) ? Math.max(0, end - Date.parse(r.startedAt)) : null, usd: t.usd, inputTokens: t.input, outputTokens: t.output };
   });
+}
+
+/** Own measurements per (category, complexity, agent, model, effort) from finished real runs. */
+export interface ModelStat extends LinkStat {
+  category: string; complexity: string; effort: string | null;
+  firstTry: number; firstTryRuns: number; avgSec: number; inputTokens: number; outputTokens: number; usd: number; runsWithUsd: number;
+  approved: number; reviewed: number;
+}
+export function modelStats(store: Store): ModelStat[] {
+  const map = new Map<string, ModelStat>();
+  for (const r of store.routedRuns()) {
+    if (r.status === 'canceled' || r.status === 'interrupted') continue; // says nothing about the model
+    const key = [r.category, r.complexity ?? 'medium', r.provider, r.model, r.effort].join('|');
+    const c = map.get(key) ?? { category: r.category!, complexity: r.complexity ?? 'medium', agent: r.provider, model: r.model, effort: r.effort,
+      runs: 0, succeeded: 0, firstTry: 0, firstTryRuns: 0, avgSec: 0, inputTokens: 0, outputTokens: 0, usd: 0, runsWithUsd: 0, approved: 0, reviewed: 0 };
+    const ok = r.status === 'succeeded';
+    const sec = r.endedAt ? (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000 : 0;
+    c.avgSec = (c.avgSec * c.runs + sec) / (c.runs + 1);
+    c.runs++;
+    if (ok) c.succeeded++;
+    if (r.attempt === 1) { c.firstTryRuns++; if (ok) c.firstTry++; }
+    const t = usageTokens(r.usage as Usage);
+    c.inputTokens += t.input; c.outputTokens += t.output;
+    if (t.usd !== null) { c.usd += t.usd; c.runsWithUsd++; }
+    if (r.reviewVerdict) { c.reviewed++; if (r.reviewVerdict === 'approve') c.approved++; }
+    map.set(key, c);
+  }
+  return [...map.values()];
+}
+/** Stats of one matrix cell, merged over effort levels (self-learning input). */
+export function cellStats(store: Store, category: string, complexity: string): LinkStat[] {
+  const out = new Map<string, LinkStat>();
+  for (const s of modelStats(store)) {
+    if (s.category !== category || s.complexity !== complexity) continue;
+    const k = `${s.agent}|${s.model}`;
+    const c = out.get(k) ?? { agent: s.agent, model: s.model, runs: 0, succeeded: 0 };
+    c.runs += s.runs; c.succeeded += s.succeeded;
+    out.set(k, c);
+  }
+  return [...out.values()];
 }

@@ -9,6 +9,7 @@ import type { AgentAdapter } from './adapters/types.ts';
 import { killTree, isAlive, maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
 import { git } from './workspace.ts';
+import { CATEGORIES, COMPLEXITIES } from './routing.ts';
 
 export const PLAN_HEADER = '# Planning request — HidForge';
 const NL = '\n';
@@ -37,6 +38,8 @@ ${ex.length ? ex.map((t) => `- #${t.id} [${t.status}] ${t.title} (paths: ${t.all
 - verifyCommands: plain commands with no shell operators (no | & ; > <), only tools that already exist in this repository, e.g. "npm test". The user approves every command; leave it empty if unsure.
 - role: one of ${ROLES.map((r) => `"${r}"`).join(', ')}.
 - readOnly: true only for analysis/review tasks that must not change files.
+- category: what kind of work it is, one of ${CATEGORIES.map((c) => `"${c}"`).join(', ')}. ui_visual = layout, styling, how a page looks; frontend_logic = client-side behaviour and state; small_edit = a rename, a typo, a one-line config change.
+- complexity: "low" (mechanical, one or two files, obvious solution), "medium" (a normal feature or fix), "high" (cross-module, subtle, or easy to get wrong). Be honest: the orchestrator picks the model from category and complexity, and a higher complexity costs more.
 
 ## Output
 Reply with ONLY one JSON object inside a \`\`\`json fenced block, exactly this shape:
@@ -49,6 +52,8 @@ Reply with ONLY one JSON object inside a \`\`\`json fenced block, exactly this s
       "key": "short-kebab-id",
       "title": "imperative title",
       "role": "Backend",
+      "category": "backend",
+      "complexity": "medium",
       "description": "what to build and how, concrete enough for an agent that has not seen this plan",
       "acceptanceCriteria": "checkable criteria",
       "dependsOn": ["other-key"],
@@ -108,6 +113,8 @@ export function validatePlan(raw: unknown, existingIds: Set<number>, maxTasks: n
       acceptanceCriteria: String(t.acceptanceCriteria ?? '').slice(0, 4000),
       dependsOn: deps.map((d) => (typeof d === 'number' || /^#?\d+$/.test(String(d)) ? Number(String(d).replace('#', '')) : String(d))),
       role, allowedPaths, verifyCommands, policy: t.readOnly === true ? 'read-only' : 'workspace-write',
+      category: (CATEGORIES as readonly string[]).includes(String(t.category)) ? String(t.category) : 'backend',
+      complexity: (COMPLEXITIES as readonly string[]).includes(String(t.complexity)) ? String(t.complexity) : 'medium',
     });
   }
   for (const t of tasks) for (const d of t.dependsOn) {
@@ -132,16 +139,18 @@ export class Planner {
     const p = store.getProject(projectId);
     if (!p.goal.trim()) throw new BadRequest('set the project goal first');
     const maxTasks = Math.max(1, Math.min(30, Number(o.maxTasks ?? 12)));
-    const { adapter, provider } = await resolveReadOnlyAgent(this.orch, o.provider ?? 'auto', 'planner');
+    // 'auto': the planning chain of the routing matrix (read-only, so agents that cannot write are fine).
+    const links = (o.provider ?? 'auto') === 'auto' ? await this.orch.chainFor('planning', 'medium', { write: false }) : [];
+    const { adapter, provider, model: linkModel, effort } = await resolveReadOnlyAgent(this.orch, o.provider ?? 'auto', 'planner', { links });
 
-    const model = cleanModel(o.model);
+    const model = cleanModel(o.model) ?? linkModel ?? null;
     const plan = store.createPlan({ projectId, provider, model, goal: p.goal });
-    store.event({ projectId, type: 'plan.started', data: { planId: plan.id, provider, model, mock: adapter.mock } });
-    void this.orch.track(this.execute(plan, p, adapter, maxTasks, (o.timeoutSec ?? 900) * 1000));
+    store.event({ projectId, type: 'plan.started', data: { planId: plan.id, provider, model, effort: effort ?? null, mock: adapter.mock } });
+    void this.orch.track(this.execute(plan, p, adapter, maxTasks, (o.timeoutSec ?? 900) * 1000, effort ?? null));
     return plan;
   }
 
-  private async execute(plan: PlanRun, p: Project, adapter: AgentAdapter, maxTasks: number, timeoutMs: number): Promise<void> {
+  private async execute(plan: PlanRun, p: Project, adapter: AgentAdapter, maxTasks: number, timeoutMs: number, effort: string | null = null): Promise<void> {
     const { store, ws } = this.orch;
     const dir = path.join(this.orch.opts.dataDir, 'planning', `p${p.id}-plan${plan.id}`);
     const out: string[] = [];
@@ -149,7 +158,7 @@ export class Planner {
       await ws.addDetached(p.repoPath, p.baseBranch, dir);
       const existing = store.listTasks(p.id);
       const files = (await git(dir, ['ls-files'])).stdout.split(NL).filter(Boolean).slice(0, 400);
-      const inv = adapter.buildInvocation({ prompt: buildPlanPrompt(p, existing, maxTasks, files), workspace: dir, model: plan.model, policy: 'read-only', trustWorkspace: this.orch.trusts(plan.provider) });
+      const inv = adapter.buildInvocation({ prompt: buildPlanPrompt(p, existing, maxTasks, files), workspace: dir, model: plan.model, effort, policy: 'read-only', trustWorkspace: this.orch.trusts(plan.provider) });
       const run = runOnce(adapter, inv, dir, {
         timeoutMs, stallMs: this.orch.opts.stallTimeoutSec * 1000,
         onEvent: (ev, stream) => {
@@ -215,6 +224,7 @@ export class Planner {
           title: t.title, description: t.description, acceptanceCriteria: t.acceptanceCriteria, assignedRole: t.role,
           dependsOn: t.dependsOn.map((d) => (typeof d === 'number' ? d : ids.get(d)!)),
           allowedPaths: t.allowedPaths, verifyCommands: t.verifyCommands, policy: t.policy, provider, model: o.model ?? null,
+          category: t.category ?? null, complexity: t.complexity ?? null,
         });
         ids.set(t.key, task.id);
         out.push(task);
