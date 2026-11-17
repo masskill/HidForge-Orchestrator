@@ -128,6 +128,30 @@ H = `gemini-4-hydrogen`, A = `gemini-4-argon`. У Antigravity й Cursor ріве
 - Маршрутизація не змінюється: агент лишається тим самим (`claude`, `codex`, `agy`), змінюється лише спосіб запуску;
   на сторінці агентів у назві з'являється «через API (платно)».
 
+### API-провайдери без CLI
+
+Окремі агенти, що працюють лише через OpenAI-сумісний API (той самий API-агент і ті самі правила: ключ у `.env`
++ перемикач «Дозволити платні API-запити»). Дані перевірено за офіційною документацією 17.11.2026; реальних запитів не було.
+У таблицю автовибору вони не входять — їх вибирають вручну в задачі або вписують у таблицю пріоритетів.
+
+| Агент | Адреса API | Ключ | Типова модель | Зусилля |
+|---|---|---|---|---|
+| `deepseek` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` (дешевша `deepseek-flash`) | low → low, medium/high → high |
+| `kimi` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | `kimi-k3.1-pro` (`kimi-k3`) | low → low, medium/high → high |
+| `minimax` | `https://api.minimax.io/v1` | `MINIMAX_API_KEY` | `MiniMax-M3` (`MiniMax-M3.1-Flash`) | не передається (лише Flash-модель) |
+| `qwen` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen4-max` (`qwen3.8-flash`) | не передається (залежить від моделі) |
+| `glm` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `glm-5.3` (`glm-5.3-flash`) | low → low, medium/high → high |
+| `grok` | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-build-0.1` (`grok-4.7`) | не передається; Chat Completions у xAI застарілий, інструменти в ньому не підтверджено документацією |
+| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `mistral-large-4` (`mistral-small-latest`) | не передається (підтримка за моделлю не підтверджена) |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `deepseek/deepseek-v4.1-flash-20261017` | як є |
+
+- Список моделей береться наживо з `GET /models` провайдера (безкоштовний запит), якщо ключ є; інакше — відомі назви вище.
+- Моделі з «мисленням» (DeepSeek, Kimi, MiniMax) вимагають повертати `reasoning_content` після виклику інструмента — API-агент це робить.
+- Офіційні CLI існують у Kimi (`kimi`), MiniMax (`mcode`), Qwen (`qwen`), xAI (`grok`), Mistral (`vibe`); на цьому ПК вони не встановлені,
+  тож адаптерів для них ще немає (формат їхнього потоку подій треба перевірити на реальному CLI).
+- Джерела: api-docs.deepseek.com, platform.kimi.ai/docs, platform.minimax.io/docs, alibabacloud.com/help/en/model-studio,
+  docs.z.ai, docs.x.ai, docs.mistral.ai, openrouter.ai/docs.
+
 ## Власна статистика
 
 Кожен запуск зберігає тип, складність, агента, модель і зусилля. Сторінка «Аналітика моделей» показує для кожної

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import type Anthropic from '@anthropic-ai/sdk';
 
-const { values: a } = parseArgs({ options: { vendor: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, policy: { type: 'string' }, 'max-usd': { type: 'string' } } });
+const { values: a } = parseArgs({ options: { vendor: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, policy: { type: 'string' }, 'max-usd': { type: 'string' }, base: { type: 'string' }, 'key-env': { type: 'string' } } });
 const READ_ONLY = a.policy === 'read-only';
 const MAX_TURNS = 60;
 const MAX_READ = 200_000;
@@ -104,10 +104,11 @@ const COMPAT: Record<string, { key: string; base: string; baseEnv: string }> = {
   openai: { key: 'OPENAI_API_KEY', base: 'https://api.openai.com/v1', baseEnv: 'OPENAI_BASE_URL' },
   gemini: { key: 'GEMINI_API_KEY', base: 'https://generativelanguage.googleapis.com/v1beta/openai', baseEnv: 'GEMINI_BASE_URL' },
 };
-interface ChatMsg { role: string; content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string }
+interface ChatMsg { role: string; content: string | null; reasoning_content?: string; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string }
 async function compat(vendor: string, prompt: string) {
-  const c = COMPAT[vendor]!;
-  const base = (process.env[c.baseEnv] || c.base).replace(/\/$/, '');
+  // Other OpenAI-compatible providers (DeepSeek, Kimi, MiniMax, ...) pass --base and --key-env.
+  const c = COMPAT[vendor] ?? { key: a['key-env']!, base: a.base!, baseEnv: '' };
+  const base = ((c.baseEnv && process.env[c.baseEnv]) || c.base).replace(/\/$/, '');
   const usage = { input_tokens: 0, output_tokens: 0 };
   const messages: ChatMsg[] = [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }];
   let last = '';
@@ -123,7 +124,8 @@ async function compat(vendor: string, prompt: string) {
     const m = j.choices[0]!.message;
     if (m.content?.trim()) { last = m.content.trim(); out({ type: 'message', text: last }); }
     if (!m.tool_calls?.length) return out({ type: 'result', ok: j.choices[0]!.finish_reason !== 'length', text: last, usage });
-    messages.push({ role: 'assistant', content: m.content ?? null, tool_calls: m.tool_calls });
+    // DeepSeek, MiniMax and Kimi thinking models require their reasoning_content back after tool calls.
+    messages.push({ role: 'assistant', content: m.content ?? null, tool_calls: m.tool_calls, ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}) });
     for (const tc of m.tool_calls) {
       let input: Record<string, unknown> = {};
       try { input = JSON.parse(tc.function.arguments || '{}'); } catch { /* reported by the tool as a missing path */ }
@@ -138,6 +140,6 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { prompt += c; });
 process.stdin.on('end', () => {
   out({ type: 'message', text: `API agent (${a.vendor} · ${a.model ?? 'default'}${a.effort ? ` · ${a.effort}` : ''}, ${READ_ONLY ? 'read-only' : 'read/write'}) — paid API call` });
-  (a.vendor === 'anthropic' ? anthropic(prompt) : COMPAT[a.vendor ?? ''] ? compat(a.vendor!, prompt) : Promise.reject(new Error(`unknown vendor ${a.vendor}`)))
+  (a.vendor === 'anthropic' ? anthropic(prompt) : COMPAT[a.vendor ?? ''] || (a.base && a['key-env']) ? compat(a.vendor!, prompt) : Promise.reject(new Error(`unknown vendor ${a.vendor}`)))
     .then(() => process.exit(0), (e: Error) => { out({ type: 'result', ok: false, text: `API error: ${e.message}` }); process.exit(1); });
 });

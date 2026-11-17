@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AGY, CLAUDE, CliAdapter } from '../src/adapters/cli.ts';
-import { API_VENDORS, ApiFallbackAdapter } from '../src/adapters/api.ts';
+import { API_VENDORS, ApiFallbackAdapter, ApiOnlyAdapter } from '../src/adapters/api.ts';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'adapters', 'api-agent.ts');
 type Body = Record<string, any>;
@@ -94,7 +94,7 @@ test('CLI first, API second: API only when the CLI is missing, the key is set an
 
   process.env.ANTHROPIC_API_KEY = 'test-key';
   d = await missing.detect();
-  assert.equal(d.installed, false, 'key alone is not enough: paid API must be enabled'); assert.match(d.reason!, /off in Settings/);
+  assert.equal(d.installed, false, 'key alone is not enough: paid API must be enabled'); assert.match(d.reason!, /вимкнено/);
 
   allowed = true;
   d = await missing.detect();
@@ -116,4 +116,39 @@ test('CLI first, API second: API only when the CLI is missing, the key is set an
   const node = new ApiFallbackAdapter(new CliAdapter({ ...CLAUDE, bin: 'node' }), API_VENDORS.claude!, () => true);
   assert.equal((await node.detect()).installed, true);
   assert.equal(node.buildInvocation({ prompt: 'p', workspace: '.', model: null, policy: 'write' as never }).command, 'node');
+});
+
+test('API-only provider (DeepSeek, Kimi, ...): any OpenAI-compatible base URL and key variable; effort only where the API takes it', async (t) => {
+  const api = await fakeApi([{ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }]);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hf-api-'));
+  const ev = await runAgent(['--vendor', 'example', '--base', api.url + '/v1', '--key-env', 'EXAMPLE_API_KEY', '--model', 'm1', '--policy', 'write'], { EXAMPLE_API_KEY: 'k' }, dir);
+  api.close();
+  assert.equal(api.bodies[0]!.url, '/v1/chat/completions');
+  assert.equal(api.bodies[0]!.auth, 'Bearer k');
+  assert.equal(api.bodies[0]!.model, 'm1');
+  assert.equal(ev.at(-1)!.ok, true);
+
+  const p = { id: 'example', name: 'Example', keyEnv: 'EXAMPLE_API_KEY', base: 'https://api.example.test/v1', defaultModel: 'm-default', models: ['m-default'], effort: null };
+  let allowed = false;
+  const ad = new ApiOnlyAdapter(p, () => allowed);
+  t.after(() => { delete process.env.EXAMPLE_API_KEY; });
+  delete process.env.EXAMPLE_API_KEY;
+  assert.match((await ad.checkAuth()).reason!, /EXAMPLE_API_KEY/);
+  process.env.EXAMPLE_API_KEY = 'k';
+  assert.match((await ad.checkAuth()).reason!, /вимкнено/);
+  allowed = true;
+  assert.equal((await ad.checkAuth()).auth, 'ok');
+  const inv = ad.buildInvocation({ prompt: 'p', workspace: '.', model: null, effort: 'high', policy: 'write' as never });
+  assert.deepEqual(inv.args.slice(1), ['--vendor', 'example', '--base', p.base, '--key-env', 'EXAMPLE_API_KEY', '--model', 'm-default', '--policy', 'write'], 'no --effort for an API without it');
+});
+
+test('thinking APIs (DeepSeek, MiniMax, Kimi): reasoning_content goes back with the tool call', async () => {
+  const api = await fakeApi([
+    { choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null, reasoning_content: 'think', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'list_files', arguments: '{"path":"."}' } }] } }] },
+    { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'done' } }] },
+  ]);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hf-api-'));
+  await runAgent(['--vendor', 'deepseek', '--base', api.url, '--key-env', 'K', '--model', 'm', '--policy', 'read-only'], { K: 'k' }, dir);
+  api.close();
+  assert.equal(api.bodies[1]!.messages[2].reasoning_content, 'think');
 });

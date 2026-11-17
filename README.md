@@ -2,13 +2,13 @@
 
 **English** · [Українська](README.uk.md) · [Русский](README.ru.md)
 
-A local, Windows-first orchestrator for AI coding agents: **Claude Code, Codex CLI, Antigravity (`agy`), Cursor Agent CLI**, plus JSON plugins (Gemini CLI, OpenCode).
+A local, Windows-first orchestrator for AI coding agents: **Claude Code, Codex CLI, Antigravity (`agy`), Cursor Agent CLI**, plus JSON plugins (Gemini CLI, OpenCode) and API-only providers (DeepSeek, Kimi, MiniMax, Qwen, GLM, Grok, Mistral, OpenRouter — your key in `.env`, paid requests only when enabled).
 
 You describe a goal. HidForge turns it into a graph of tasks (DAG) and runs several agents in parallel, each in its own isolated git worktree. Every result goes through independent checks, then waits for your **Approve & Merge**. You end up with one consistent repository, and the state survives restarts.
 
 Everything runs on your own computer. HidForge uses the CLIs you have already installed and signed in to — it never asks for, stores or forwards API keys, tokens or cookies.
 
-> **Status: v0.5 (beta).** Overall progress is 93% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
+> **Status: v0.5 (beta).** Overall progress is 94% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
 
 ---
 

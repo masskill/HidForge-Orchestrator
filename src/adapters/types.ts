@@ -16,6 +16,7 @@ export interface AgentStatus {
   id: string;
   name: string;
   mock: boolean;
+  apiOnly?: boolean;      // a paid API provider without a CLI (needs a key in .env)
   installed: boolean;
   version: string | null;
   auth: 'ok' | 'missing' | 'unknown';
@@ -52,6 +53,7 @@ export interface AgentAdapter {
   readonly id: string;
   readonly name: string;
   readonly mock: boolean;
+  readonly apiOnly?: boolean;
   detect(): Promise<{ installed: boolean; version: string | null; reason: string | null }>;
   checkAuth(): Promise<{ auth: 'ok' | 'missing' | 'unknown'; reason: string | null }>;
   capabilities(): Capabilities;

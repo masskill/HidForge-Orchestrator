@@ -1,7 +1,7 @@
 // HidForge UI — pages composed from shared components in ui.js. Hash routing, no build step.
 import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
-  PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
+  PermissionChip, Disclosure, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
   Kanban, DagGraph, EventCard, statusTone, Progress,
 } from './ui.js';
@@ -52,7 +52,7 @@ async function api(method, path, body) {
 }
 const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, 'danger'); } };
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
-const agentState = (a) => (!a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
+const agentState = (a) => (a.apiOnly && a.auth === 'missing' ? ['потрібен ключ API', 'neutral'] : !a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
   : a.auth === 'unknown' ? ['авторизація невідома', 'warning'] : ['готовий', 'success']);
 /** The Mock agent is a demo tool: shown only in a project that already uses it (the demo project). */
 const usesMock = () => state.tasks.some((t) => t.provider === 'mock');
@@ -102,7 +102,7 @@ function renderShell() {
   nav.replaceChildren(...PAGES.map((p) => h('a', { href: `#/${p.id}`, 'aria-current': state.page === p.id ? 'page' : null, onclick: () => document.body.classList.remove('nav-open') },
     icon(p.icon), p.label,
     p.id === 'tasks' && state.tasks.length ? h('span', { class: 'count' }, state.tasks.length) : null,
-    p.id === 'agents' && state.agents ? h('span', { class: 'count' }, `${state.agents.filter((a) => a.available && !a.mock).length}/${state.agents.filter((a) => !a.mock).length}`) : null)));
+    p.id === 'agents' && state.agents ? h('span', { class: 'count' }, `${state.agents.filter((a) => a.available && !a.mock).length}/${state.agents.filter((a) => !a.mock && !(a.apiOnly && !a.available)).length}`) : null)));
   const sel = $('#projectSel');
   sel.replaceChildren(...(state.projects.length ? state.projects.map((p) => h('option', { value: p.id }, p.name)) : [h('option', { value: '' }, 'Немає проєктів')]));
   sel.value = state.projectId ?? '';
@@ -1131,8 +1131,9 @@ function agentsPage() {
         body: h('div', { class: 'stack' },
           a.mock ? h('div', { class: 'mockflag' }, 'ДЕМО-АГЕНТ — НЕ СПРАВЖНІЙ AI') : null,
           a.reason ? h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, a.reason) : null,
-          h('div', { class: 'row' }, ...Object.entries(a.capabilities).map(([k, v]) => PermissionChip(k, v))),
-          a.notes.length ? h('ul', { class: 'muted', style: 'margin:0;padding-left:18px;font-size:var(--fs-sm)' }, ...a.notes.map((n) => h('li', {}, n))) : null),
+          Disclosure('Можливості й примітки',
+            h('div', { class: 'row' }, ...Object.entries(a.capabilities).map(([k, v]) => PermissionChip(k, v))),
+            a.notes.length ? h('ul', { class: 'muted', style: 'margin:0;padding-left:18px;font-size:var(--fs-sm)' }, ...a.notes.map((n) => h('li', {}, n))) : null)),
       });
     })) : PanelCard({}, EmptyState({ icon: 'refresh', title: 'Перевірка агентів…', text: 'Шукаємо CLI у PATH і перевіряємо авторизацію.' })),
     agentsExtSettings(),
@@ -1206,13 +1207,12 @@ function settingsPage() {
 function apiSettings() {
   const s = state.settings;
   if (!s?.apiKeys) return null;
-  const KEYS = [['ANTHROPIC_API_KEY', 'Claude → Anthropic API'], ['OPENAI_API_KEY', 'Codex → OpenAI API'], ['GEMINI_API_KEY', 'Antigravity → Gemini API']];
   const toggle = act(async (v) => { await api('PUT', '/api/settings', { apiFallback: v }); await Promise.all([loadSettings(), loadAgents()]); toast(v ? 'Платний API увімкнено як резерв' : 'Платний API вимкнено', 'success'); render(); });
-  return PanelCard({ title: 'Резервний API (платно)', subtitle: 'Якщо CLI агента немає або в ньому не виконано вхід — HidForge може працювати напряму через API провайдера' },
+  return PanelCard({ title: 'Резервний API (платно)', subtitle: 'API-провайдери без CLI (DeepSeek, Kimi, MiniMax…) і запасний шлях для Claude, Codex, Antigravity, коли їхнього CLI немає' },
     h('p', { class: 'text-2', style: 'margin:0' }, 'Поки CLI встановлено й увійдено, використовується тільки CLI. API — запасний шлях: кожен запит оплачується з вашого ключа провайдера. Ключі HidForge не зберігає: впишіть їх у файл .env поруч із HidForge (він не потрапляє в git) і перезапустіть HidForge. API-агент читає й записує файли робочої копії, але не запускає команд — перевірку роблять команди перевірки HidForge.'),
-    h('div', { class: 'stack' }, ...KEYS.map(([k, label]) => h('div', { class: 'row between wrap-row' }, h('span', {}, label, ' ', h('span', { class: 'mono muted' }, k)),
-      s.apiKeys[k] ? Badge('ключ є', 'success') : Badge('ключа немає', 'neutral')))),
-    Toggle({ label: 'Дозволити платний API, коли CLI недоступний', checked: s.apiFallback === true, onChange: (v) => toggle(v) }));
+    h('div', { class: 'stack' }, ...s.apiKeys.map((k) => h('div', { class: 'row between wrap-row' }, h('span', {}, k.label, ' ', h('span', { class: 'mono muted' }, k.key)),
+      k.present ? Badge('ключ є', 'success') : Badge('ключа немає', 'neutral')))),
+    Toggle({ label: 'Дозволити платні API-запити', checked: s.apiFallback === true, onChange: (v) => toggle(v) }));
 }
 /** Auto-routing: effort ceiling, opt-in Fable link, self-learning, agents that cannot write, and the editable priority table. */
 function routingSettings() {

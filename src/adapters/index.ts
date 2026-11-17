@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AGY, CLAUDE, CODEX, CURSOR, CliAdapter } from './cli.ts';
-import { API_VENDORS, ApiFallbackAdapter } from './api.ts';
+import { API_PROVIDERS, API_VENDORS, ApiFallbackAdapter, ApiOnlyAdapter } from './api.ts';
 import type { AgentAdapter, AgentEvent, AgentStatus, Capabilities } from './types.ts';
 
 const here = fileURLToPath(import.meta.url);
@@ -34,7 +34,7 @@ export const APP_PLUGINS_DIR = path.join(path.dirname(here), '..', '..', 'plugin
 /** Built-in agents. Claude, Codex and Antigravity fall back to their provider's API when the CLI is unavailable and `allowApi()` is true. */
 export function defaultAdapters(allowApi: () => boolean = () => false): AgentAdapter[] {
   const cli = (spec: typeof CLAUDE) => (API_VENDORS[spec.id] ? new ApiFallbackAdapter(new CliAdapter(spec), API_VENDORS[spec.id]!, allowApi) : new CliAdapter(spec));
-  return [new MockAdapter(), cli(CLAUDE), cli(CODEX), new CliAdapter(CURSOR), cli(AGY)];
+  return [new MockAdapter(), cli(CLAUDE), cli(CODEX), new CliAdapter(CURSOR), cli(AGY), ...API_PROVIDERS.map((p) => new ApiOnlyAdapter(p, allowApi))];
 }
 
 export type RoutingPolicy = 'cost-first' | 'balanced' | 'quality-first';
@@ -56,7 +56,7 @@ export class AgentRegistry {
   async status(refresh = false): Promise<AgentStatus[]> {
     if (this.cache && !refresh) return this.cache;
     this.cache = await Promise.all([...this.adapters.values()].map(async (a): Promise<AgentStatus> => {
-      const base = { id: a.id, name: a.name, mock: a.mock, capabilities: a.capabilities(), notes: a.notes() };
+      const base = { id: a.id, name: a.name, mock: a.mock, apiOnly: a.apiOnly === true, capabilities: a.capabilities(), notes: a.notes() };
       try {
         const d = await a.detect();
         if (!d.installed) return { ...base, installed: false, version: null, auth: 'unknown', available: false, reason: d.reason ?? 'not installed' };

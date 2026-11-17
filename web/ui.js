@@ -101,6 +101,8 @@ export const statusTone = (s) => STATUS[s]?.[1] ?? 'neutral';
 /** StatusBadge(status) — one vocabulary for task statuses across all pages. */
 export const StatusBadge = (s) => Badge(STATUS_LABEL[s] || s, statusTone(s), { live: s === 'running', title: s });
 export const Chip = (text, o = {}) => h('span', { class: cx('chip', o.off && 'off'), title: o.title }, text);
+/** Disclosure(summary, ...children) — secondary details folded away by default (<details>, keyboard-accessible). */
+export const Disclosure = (summary, ...children) => h('details', { class: 'disclosure' }, h('summary', {}, summary), h('div', { class: 'stack' }, ...children));
 export const PermissionChip = (name, value) => Chip(value === 'supported' ? name : `${name}: ${value}`, { off: value !== 'supported', title: value });
 
 // ---------------------------------------------------------------- layout blocks

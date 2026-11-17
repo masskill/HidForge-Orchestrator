@@ -5,9 +5,10 @@
   "verified": false,
   "notes": [
     "Headless: prompt via stdin (non-TTY), `--output-format stream-json`; write tasks `--approval-mode auto_edit`, read-only `--approval-mode plan` (google-gemini/gemini-cli docs/cli/cli-reference.md). `--yolo` / `--approval-mode yolo` are never used.",
-    "Auth uses the CLI's own login (`gemini` once interactively). HidForge only checks that ~/.gemini/oauth_creds.json exists or an API-key variable is set; it never reads them."
+    "Google sign-in no longer works for personal accounts: since 2026 Gemini CLI answers `IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals` and points to Antigravity (checked 2026-11-17, gemini-cli 0.68.0). Use the Antigravity agent (agy) instead, or an API key (paid). HidForge only checks that a key variable is set; it never reads it.",
+    "Headless runs also need Gemini CLI folder trust, which HidForge does not grant."
   ],
-  "auth": { "files": [".gemini/oauth_creds.json"], "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI"], "hint": "run `gemini` once and log in" },
+  "auth": { "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI"], "hint": "вхід через Google у Gemini CLI для особистих акаунтів більше не працює (Google перевів його в Antigravity) — використовуйте агента Antigravity або впишіть GEMINI_API_KEY у .env (платно)" },
   "args": {
     "base": ["--output-format", "stream-json"],
     "write": ["--approval-mode", "auto_edit"],

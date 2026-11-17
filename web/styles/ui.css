@@ -300,9 +300,10 @@ dialog.modal::backdrop { background: rgba(3, 6, 4, 0.66); }
 .activity-head .badge { white-space: normal; }
 .activity-task { font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
 .activity-summary { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.activity-details { min-width: 0; }
-.activity-details > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); }
-.activity-details > summary:hover { color: var(--accent); }
+.activity-details, .disclosure { min-width: 0; }
+.activity-details > summary, .disclosure > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); }
+.activity-details > summary:hover, .disclosure > summary:hover { color: var(--accent); }
+.disclosure > .stack { margin-top: var(--s-2); }
 .activity-json { max-width: 100%; max-height: 360px; overflow: auto; background: var(--bg-app);
   color: var(--text-2); border: 1px solid var(--border); border-radius: var(--r-sm);
   padding: var(--s-3); font: var(--fs-sm)/1.5 var(--mono); white-space: pre-wrap;

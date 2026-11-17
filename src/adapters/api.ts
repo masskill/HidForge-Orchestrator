@@ -21,7 +21,10 @@ export const API_VENDORS: Record<string, Vendor> = {
     map: (m) => ({ model: (m || 'gemini-4-argon').replace(EFFORT_SUFFIX, ''), effort: EFFORT_SUFFIX.exec(m ?? '')?.[1] ?? null }) },
 };
 /** Which provider keys are present (booleans only — values are never read out). */
-export const apiKeysPresent = () => Object.fromEntries(Object.values(API_VENDORS).map((v) => [v.keyEnv, Boolean(process.env[v.keyEnv])]));
+export const apiKeysPresent = () => [
+  ...Object.entries(API_VENDORS).map(([id, v]) => ({ key: v.keyEnv, label: `${({ claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity' } as Record<string, string>)[id]} → ${v.vendor} API (якщо немає CLI)` })),
+  ...API_PROVIDERS.map((p) => ({ key: p.keyEnv, label: p.name })),
+].map((k) => ({ ...k, present: Boolean(process.env[k.key]) }));
 
 const API_CAPS: Capabilities = { headless: 'supported', streamEvents: 'supported', cancel: 'supported', questions: 'unsupported', usage: 'supported', modelSelect: 'supported', readOnlyMode: 'supported' };
 let jsonLines: MockAdapter | null = null; // lazy: index.ts imports this module (circular import)
@@ -38,7 +41,7 @@ export class ApiFallbackAdapter implements AgentAdapter {
   get name() { return this.viaApi ? `${this.inner.name} — через API (платно)` : this.inner.name; }
   private apiReady() { return Boolean(process.env[this.v.keyEnv]) && this.allowed(); }
   private apiHint() {
-    return process.env[this.v.keyEnv] ? 'paid API fallback is off in Settings' : `set ${this.v.keyEnv} in .env and enable paid API fallback in Settings to use the ${this.v.vendor} API instead`;
+    return process.env[this.v.keyEnv] ? 'платні API-запити вимкнено в Налаштуваннях' : `або впишіть ${this.v.keyEnv} у .env і ввімкніть платні API-запити в Налаштуваннях — тоді працюватиме ${this.v.vendor} API`;
   }
 
   async detect() {
@@ -66,4 +69,58 @@ export class ApiFallbackAdapter implements AgentAdapter {
   }
   parseLine(line: string): AgentEvent | null { return this.viaApi ? (jsonLines ??= new MockAdapter()).parseLine(line) : this.inner.parseLine(line); }
   async listModels(): Promise<ModelInfo[]> { return this.viaApi ? this.v.models.map((id) => ({ id, label: `${id} (API)` })) : this.inner.listModels(); }
+}
+
+/** API-only providers (no CLI on this PC): OpenAI-compatible Chat Completions. Facts checked 2026-11-17, sources in docs/ROUTING.md. */
+/** `effort`: HidForge level -> the value this API accepts (null = the parameter is not sent: unsupported or model-dependent). */
+export interface ApiProvider { id: string; name: string; keyEnv: string; base: string; defaultModel: string; models: string[]; effort: Partial<Record<string, string>> | null }
+const LOW_HIGH = { low: 'low', medium: 'high', high: 'high' }; // APIs with only low|high|max
+export const API_PROVIDERS: ApiProvider[] = [
+  { id: 'deepseek', name: 'DeepSeek', keyEnv: 'DEEPSEEK_API_KEY', base: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-pro', models: ['deepseek-v4-pro', 'deepseek-flash'], effort: LOW_HIGH },
+  { id: 'kimi', name: 'Kimi (Moonshot AI)', keyEnv: 'MOONSHOT_API_KEY', base: 'https://api.moonshot.ai/v1', defaultModel: 'kimi-k3.1-pro', models: ['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3'], effort: LOW_HIGH },
+  { id: 'minimax', name: 'MiniMax', keyEnv: 'MINIMAX_API_KEY', base: 'https://api.minimax.io/v1', defaultModel: 'MiniMax-M3', models: ['MiniMax-M3', 'MiniMax-M3.1-Flash'], effort: null },
+  { id: 'qwen', name: 'Qwen (Alibaba Model Studio)', keyEnv: 'DASHSCOPE_API_KEY', base: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen4-max', models: ['qwen4-max', 'qwen3.8-flash'], effort: null },
+  { id: 'glm', name: 'GLM (Z.ai)', keyEnv: 'ZAI_API_KEY', base: 'https://api.z.ai/api/paas/v4', defaultModel: 'glm-5.3', models: ['glm-5.3', 'glm-5.3-flash'], effort: LOW_HIGH },
+  { id: 'grok', name: 'Grok (xAI)', keyEnv: 'XAI_API_KEY', base: 'https://api.x.ai/v1', defaultModel: 'grok-build-0.1', models: ['grok-build-0.1', 'grok-4.7'], effort: null },
+  { id: 'mistral', name: 'Mistral', keyEnv: 'MISTRAL_API_KEY', base: 'https://api.mistral.ai/v1', defaultModel: 'mistral-large-4', models: ['mistral-large-4', 'mistral-small-latest'], effort: null },
+  { id: 'openrouter', name: 'OpenRouter (моделі різних вендорів)', keyEnv: 'OPENROUTER_API_KEY', base: 'https://openrouter.ai/api/v1', defaultModel: 'deepseek/deepseek-v4.1-flash-20261017',
+    models: ['deepseek/deepseek-v4.1-flash-20261017', 'anthropic/claude-opus-5.5-20260921'], effort: { low: 'low', medium: 'medium', high: 'high' } },
+];
+
+/** Runs only through the provider's API: needs the key in .env and paid API enabled in Settings. */
+export class ApiOnlyAdapter implements AgentAdapter {
+  readonly mock = false;
+  readonly apiOnly = true;
+  readonly p: ApiProvider;
+  private readonly allowed: () => boolean;
+  constructor(p: ApiProvider, allowed: () => boolean) { this.p = p; this.allowed = allowed; }
+  get id() { return this.p.id; }
+  get name() { return `${this.p.name} — API (платно)`; }
+  async detect() { return { installed: true, version: 'API', reason: null }; }
+  async checkAuth() {
+    if (!process.env[this.p.keyEnv]) return { auth: 'missing' as const, reason: `впишіть ${this.p.keyEnv} у .env і ввімкніть платні API-запити в Налаштуваннях` };
+    if (!this.allowed()) return { auth: 'missing' as const, reason: 'платні API-запити вимкнено в Налаштуваннях' };
+    return { auth: 'ok' as const, reason: null };
+  }
+  capabilities() { return API_CAPS; }
+  notes() { return [`OpenAI-compatible API at ${this.p.base}, key from ${this.p.keyEnv} (.env). Reads and writes files in the worktree; cannot run commands. Paid per request.`]; }
+  buildInvocation(ctx: StartContext): Invocation {
+    const effort = ctx.effort ? this.p.effort?.[ctx.effort] ?? null : null;
+    return { command: process.execPath, stdin: ctx.prompt,
+      args: [API_SCRIPT, '--vendor', this.p.id, '--base', this.p.base, '--key-env', this.p.keyEnv, '--model', ctx.model || this.p.defaultModel, '--policy', ctx.policy, ...(effort ? ['--effort', effort] : [])] };
+  }
+  parseLine(line: string): AgentEvent | null { return (jsonLines ??= new MockAdapter()).parseLine(line); }
+  /** Live list from the provider's GET /models (free metadata call); falls back to the known ids. */
+  async listModels(): Promise<ModelInfo[]> {
+    const key = process.env[this.p.keyEnv];
+    if (key) {
+      try {
+        const r = await fetch(`${this.p.base}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(20_000) });
+        const j = await r.json() as { data?: { id?: string }[] };
+        const ids = (j.data ?? []).map((m) => m.id).filter((x): x is string => Boolean(x));
+        if (r.ok && ids.length) return ids.map((id) => ({ id, label: id }));
+      } catch { /* offline or rejected: use the known ids */ }
+    }
+    return this.p.models.map((id) => ({ id, label: `${id}${id === this.p.defaultModel ? ' (типова)' : ''}` }));
+  }
 }

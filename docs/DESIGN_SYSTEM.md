@@ -49,6 +49,7 @@
 | `PanelCard({title, subtitle, actions, flush}, ...children)` | основна панель; `flush` — для таблиць |
 | `StatCard({label, value, hint, tone})` | великі числа на дашборді |
 | `Progress({value, label, tone})` | смуга приблизного прогресу з `role=progressbar`; число завжди поруч текстом; 100% — м'ятна |
+| `Disclosure(summary, ...children)` | згорнуті другорядні подробиці (`<details>`, працює з клавіатури); напр. можливості й примітки агента |
 | `StatLink({href, ...StatCard})` | StatCard як посилання на сторінку з деталями (напр. «Витрати» на огляді) |
 | `InfoList([[label, value]])` | пари InfoRow як `<dl>` |
 | `Badge(text, tone)`, `StatusBadge(status)`, `Chip`, `PermissionChip` | статуси; єдиний словник статусів задач — `STATUS_LABEL` |

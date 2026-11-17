@@ -6,6 +6,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { run } from '../proc.ts';
 import { CliAdapter } from './cli.ts';
+import { API_PROVIDERS } from './api.ts';
 import type { AgentEvent, Capabilities, ModelInfo } from './types.ts';
 
 type O = Record<string, unknown>;
@@ -25,7 +26,7 @@ export interface PluginSpec {
   events: EventRule[];
 }
 
-export const BUILTIN_IDS = ['mock', 'claude', 'codex', 'cursor', 'agy'];
+export const BUILTIN_IDS = ['mock', 'claude', 'codex', 'cursor', 'agy', ...API_PROVIDERS.map((p) => p.id)];
 const FORBIDDEN = /dangerously|yolo|bypass|skip-permissions|--force|--trust|danger-full-access|full-auto|allow-all/i;
 const KINDS = ['message', 'tool', 'result', 'error', 'log'];
 
