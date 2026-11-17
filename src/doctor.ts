@@ -123,6 +123,7 @@ export class Doctor {
     if (!['blocked', 'failed'].includes(t.status) || !store.getProject(t.projectId).reviewPolicy.autoFix) return Promise.resolve();
     if (note && HUMAN_NOTES.some((n) => note.startsWith(n))) return Promise.resolve();
     if (t.artifacts.ownerQuestion || this.orch.isPaused(t.projectId)) return Promise.resolve();
+    if (Number(t.artifacts.doctorErrors ?? 0) >= 3) return Promise.resolve(); // the diagnosis itself keeps failing: stop spending limits on it
     const max = maxFixes(store.getProject(t.projectId).reviewPolicy.autoAnswer);
     if (Number(t.artifacts.autoFixes ?? 0) >= max) {
       if (!t.artifacts.autoFixExhausted) {
@@ -192,7 +193,7 @@ export class Doctor {
     } catch (e) {
       const msg = (e as Error).message;
       try {
-        this.save(taskId, { status: 'failed', at, ...meta, error: msg });
+        this.save(taskId, { status: 'failed', at, ...meta, error: msg }, { doctorErrors: Number(store.getTask(taskId).artifacts.doctorErrors ?? 0) + 1 });
         store.addEvidence(taskId, { kind: 'doctor', ok: false, summary: `Auto-fix could not diagnose the task: ${msg}` });
       } catch { /* task deleted */ }
     } finally {

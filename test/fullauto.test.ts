@@ -63,3 +63,10 @@ test('auto-answer: an accepted plan starts at once; a diagnosis interrupted by a
     await orch.doctor.maybeStart(t.id); await orch.doctor.maybeStart(t.id); // a second start while one is queued must not throw
   } finally { await orch.stop(); }
 });
+
+test('a diagnosis with unescaped Windows paths in its JSON still parses', async () => {
+  const { extractJson } = await import('../src/oneshot.ts');
+  const raw = String.raw`{"action":"retry","feedback":"use C:\Users\x and \d, keep \Server and a\nb"}`;
+  assert.deepEqual(extractJson(raw), { action: 'retry', feedback: String.raw`use C:\Users\x and \d, keep \Server and a` + '\nb' });
+  assert.throws(() => extractJson('{"a": }'));
+});

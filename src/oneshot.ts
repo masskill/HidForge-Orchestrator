@@ -9,11 +9,20 @@ import { effortFlagFor, vendorOf, type Link } from './routing.ts';
 
 export function extractJson(text: string): unknown {
   const fences = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((m) => m[1]!);
-  for (const f of fences.reverse()) { try { return JSON.parse(f); } catch { /* next */ } }
+  for (const f of fences.reverse()) { try { return parseLenient(f); } catch { /* next */ } }
   const a = text.indexOf('{');
   const b = text.lastIndexOf('}');
-  if (a >= 0 && b > a) return JSON.parse(text.slice(a, b + 1));
+  if (a >= 0 && b > a) return parseLenient(text.slice(a, b + 1));
   throw new Error('no JSON object found');
+}
+
+/** JSON.parse, then once more with stray backslashes escaped: models write Windows paths like "C:\Users" unescaped. */
+function parseLenient(s: string): unknown {
+  try { return JSON.parse(s); } catch (e) {
+    const fixed = s.replace(/\\(["\\/bfnrtu])|\\/g, (m, ok: string | undefined) => (ok ? m : '\\\\')); // valid pairs stay as they are
+    if (fixed === s) throw e;
+    return JSON.parse(fixed);
+  }
 }
 
 /** Resolve 'auto' via routing policy and make sure the agent is available and can run read-only. */
