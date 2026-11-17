@@ -159,6 +159,8 @@ export class Reviewer {
   private readonly orch: Orchestrator;
   private readonly live = new Map<number, OneShot>(); // taskId -> session
   private readonly active = new Set<number>(); // taskIds from start() until the session has finished
+  /** Auto-merge re-runs a failed review once the failed session has fully finished (its slot is free). */
+  private readonly retryAfter = new Map<number, { exclude?: string }>();
   private abandoned = false;
   constructor(orch: Orchestrator) { this.orch = orch; }
 
@@ -211,7 +213,11 @@ export class Reviewer {
       if (t.status !== 'review') throw new Conflict(`task is ${t.status}`);
       t = this.save(taskId, { status: 'running', attempt: t.attempts, provider, model, effort: effort ?? null, pid: null, at: new Date().toISOString() });
       store.event({ projectId: p.id, taskId, type: 'review.started', data: { provider, model, effort: effort ?? null, authorVendor: authorVendor ?? null, mock: adapter.mock, attempt: t.attempts } });
-      void this.orch.track(this.launch(t, p, adapter, provider, model, effort ?? null).finally(() => this.active.delete(taskId)));
+      void this.orch.track(this.launch(t, p, adapter, provider, model, effort ?? null).finally(() => {
+        this.active.delete(taskId);
+        const again = this.retryAfter.get(taskId);
+        if (again) { this.retryAfter.delete(taskId); void this.orch.track(this.autoStart(taskId, again)); }
+      }));
       return t;
     } catch (e) { this.active.delete(taskId); throw e; }
   }
@@ -287,8 +293,9 @@ export class Reviewer {
     // auto-merge: a review that failed to run (agent error, limit) is re-run once per attempt — with the limit pause, by another agent
     if (pol.autoMerge && r.status === 'failed' && t.status === 'review' && t.attempts === r.attempt && t.artifacts.reviewRetried !== r.attempt) {
       store.patchTask(taskId, { artifacts: { ...t.artifacts, reviewRetried: r.attempt } });
-      // another agent than the one that failed (a broken CLI would fail again)
-      setImmediate(() => void this.orch.track(this.autoStart(taskId, pol.provider === 'auto' ? { exclude: r.provider } : {})));
+      // another agent than the one that failed (a broken CLI would fail again); started when this session's slot is free
+      this.retryAfter.set(taskId, pol.provider === 'auto' ? { exclude: r.provider } : {});
+      if (!this.active.has(taskId)) { this.retryAfter.delete(taskId); void this.orch.track(this.autoStart(taskId, pol.provider === 'auto' ? { exclude: r.provider } : {})); }
       return;
     }
     if (mode !== 'required' || r.status !== 'succeeded' || t.status !== 'review' || t.attempts !== r.attempt) return;

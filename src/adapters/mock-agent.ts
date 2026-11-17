@@ -2,7 +2,8 @@
 // found in it, writes files in cwd and prints NDJSON events. Used for demo mode and e2e tests.
 // Planner mode: when the prompt is a planning request, it prints a fixed JSON plan and writes nothing.
 // Reviewer mode: for a code review request it prints a JSON verdict (review* directives) and writes nothing.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
@@ -15,6 +16,7 @@ interface Directive {
   plan?: unknown; planRaw?: string; // planner-mode overrides
   // reviewer-mode overrides: verdict object or verdict name; request changes while attempt <= reviewAttempts
   review?: unknown; reviewRaw?: string; reviewAttempts?: number; reviewHang?: boolean; reviewWrite?: Record<string, string>;
+  reviewFailOnce?: string; // the first review with this token fails (exit 1); a marker in the OS temp dir remembers it
   doctor?: unknown; // auto-fix mode: the advice JSON (default: retry)
   ask?: string; askAttempts?: number; // write nothing and end with "OWNER QUESTION: <ask>" while attempt <= askAttempts (default 1)
 }
@@ -123,6 +125,10 @@ async function chat(d: Directive) {
 
 async function review(d: Directive, attempt: number) {
   out({ type: 'message', text: `mock reviewer started (attempt ${attempt}) in ${path.basename(process.cwd())}` });
+  if (d.reviewFailOnce) {
+    const mark = path.join(os.tmpdir(), `hf-mock-review-${d.reviewFailOnce}`);
+    if (!existsSync(mark)) { writeFileSync(mark, '1'); out({ type: 'error', text: 'simulated reviewer crash' }); process.exit(1); }
+  }
   if (d.reviewHang) { out({ type: 'message', text: 'hanging (no further output)' }); await new Promise(() => {}); }
   for (const [rel, content] of Object.entries(d.reviewWrite ?? {})) writeFileSync(path.resolve(process.cwd(), rel), content, 'utf8'); // misbehaving reviewer
   await sleep(200);

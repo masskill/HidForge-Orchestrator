@@ -20,6 +20,12 @@ test('auto-merge: gates pass, the AI review approves, the task merges by itself;
     const done = await waitStatus(orch, t.id, ['merged', 'blocked', 'failed']);
     assert.equal(done.status, 'merged');
     assert.ok(done.evidence.some((e) => e.summary.startsWith('Approved automatically')));
+    // a review that crashes is re-run once (after the crashed session has finished) and the task still merges
+    const r = orch.createTask(project.id, { title: 'crash', provider: 'mock', allowedPaths: ['r/**'], description: mock({ reviewFailOnce: `t${Date.now()}`, write: { 'r/r.txt': 'R' } }) });
+    orch.submit(r.id);
+    const m = await waitStatus(orch, r.id, ['merged', 'blocked', 'failed'], 30_000).catch(() => orch.store.getTask(r.id));
+    assert.equal(m.status, 'merged', JSON.stringify(m.evidence.map((e) => e.summary)));
+    assert.ok(m.evidence.some((e) => /AI review failed/.test(e.summary)));
   } finally { await orch.stop(); }
 });
 
