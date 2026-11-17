@@ -161,6 +161,8 @@ export class Chat {
       text = maskSecrets(final.trim());
       error = r.killReason ?? (r.code !== 0 ? `agent exited with code ${r.code}` : !r.result ? 'agent exited without a result' : r.result.isError ? `agent reported an error: ${r.result.text.slice(0, 500)}` : null);
       if (!error && !text) error = 'the agent returned an empty answer';
+      if (error && !r.killReason && this.orch.noteLimit(pending.provider, [error, text, ...r.messages.slice(-20)].join(NL), { projectId: p.id }))
+        error = `${pending.provider} вичерпав ліміт і поставлений на паузу; надішліть ще раз — відповість інший агент (${error})`;
       if (!error) {
         const sp = splitPlan(text, new Set(tasks.map((t) => t.id)));
         if (sp.plan) {

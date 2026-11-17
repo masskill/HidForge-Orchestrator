@@ -22,6 +22,8 @@ export interface AgentStatus {
   auth: 'ok' | 'missing' | 'unknown';
   available: boolean;
   reason: string | null;
+  /** Set while HidForge has paused the agent after it hit its usage limit (then available = false). */
+  paused?: { until: string; reason: string } | null;
   capabilities: Capabilities;
   notes: string[];
 }

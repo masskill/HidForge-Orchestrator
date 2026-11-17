@@ -7,7 +7,7 @@ import { MockAdapter } from '../src/adapters/index.ts';
 import { validatePlugin, pluginAdapter } from '../src/adapters/plugin.ts';
 import { validatePlan } from '../src/planner.ts';
 import { modelStats } from '../src/costs.ts';
-import { setup, mock, waitStatus } from './helpers.ts';
+import { setup, mock, waitFor, waitStatus } from './helpers.ts';
 
 const ALL = new Set(['claude', 'codex', 'agy', 'cursor']);
 const HIGH = EFFORTS.indexOf('high');
@@ -133,5 +133,45 @@ test('escalation: a failed attempt goes to the next link; the task stays auto; r
     const sol = stats.find((s) => s.agent === 'codex')!;
     assert.deepEqual([sol.category, sol.complexity, sol.model, sol.effort, sol.runs, sol.succeeded, sol.firstTry], ['backend', 'medium', 'gpt-6.1-sol', 'high', 1, 0, 0]);
     assert.equal(stats.find((s) => s.model === 'sonnet')!.succeeded, 1);
+  } finally { await orch.stop(); }
+});
+
+test('usage limit: the agent is paused, the attempt is not counted, the next link takes over; an explicit agent hands over; all paused = wait', async () => {
+  const { orch, project } = await setup({ adapters: [new MockAdapter(), new Fake('claude'), new Fake('codex'), new Fake('agy')] });
+  try {
+    const t = orch.createTask(project.id, { title: 'lim', provider: 'auto', category: 'backend', complexity: 'medium', allowedPaths: ['b/**'],
+      description: mock({ limitModels: ['gpt-6.1-sol'], write: { 'b/b.txt': 'B' } }) });
+    orch.submit(t.id);
+    const done = await waitStatus(orch, t.id, ['review']);
+    assert.deepEqual(orch.store.runsForTask(t.id).map((r) => [r.provider, r.status]), [['codex', 'failed'], ['claude', 'succeeded']]);
+    assert.equal(done.attempts, 1, 'the limit attempt is not counted');
+    assert.equal(done.artifacts.limitHandovers, 1);
+    const p = orch.pauses().codex!;
+    assert.ok(p && new Date(p.until).getTime() - Date.now() > 100 * 60_000, 'paused for ~2 hours, as the message said');
+    const st = (await orch.registry.status()).find((s) => s.id === 'codex')!;
+    assert.equal(st.available, false);
+    assert.equal(st.paused?.until, p.until);
+    assert.equal(orch.store.events({ type: 'agent.paused' }).length, 1);
+
+    // an explicitly chosen agent that is paused: the task goes to the best link that is not
+    const t2 = orch.createTask(project.id, { title: 'explicit', provider: 'codex', category: 'backend', complexity: 'medium', allowedPaths: ['c/**'], description: mock({ write: { 'c/c.txt': 'C' } }) });
+    orch.submit(t2.id);
+    await waitStatus(orch, t2.id, ['review']);
+    assert.deepEqual(orch.store.runsForTask(t2.id).map((r) => [r.provider, r.model]), [['claude', 'sonnet']]);
+
+    // every agent paused: the task waits in the queue until the earliest pause ends, it does not fail
+    const soon = new Date(Date.now() + 30 * 60_000).toISOString();
+    orch.pauseAgent('claude', { until: soon, reason: 'test' });
+    orch.pauseAgent('agy', { until: new Date(Date.now() + 90 * 60_000).toISOString(), reason: 'test' });
+    const t3 = orch.createTask(project.id, { title: 'wait', provider: 'auto', category: 'backend', complexity: 'low', allowedPaths: ['d/**'], description: mock({}) });
+    orch.submit(t3.id);
+    await waitFor(() => orch.store.events({ taskId: t3.id, type: 'task.waiting' }).length > 0, 5000, 'task.waiting');
+    const w = orch.store.getTask(t3.id);
+    assert.equal(w.status, 'queued');
+    assert.equal(w.notBefore, soon);
+    // the human lifts a pause: the agent is usable again
+    orch.resumeAgent('claude');
+    assert.equal(orch.pauses().claude, undefined);
+    assert.equal((await orch.registry.status()).find((s) => s.id === 'claude')!.available, true);
   } finally { await orch.stop(); }
 });

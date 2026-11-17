@@ -10,6 +10,8 @@ interface Directive {
   sleepMs?: number; steps?: number; write?: Record<string, string>;
   exit?: number; mode?: 'ok' | 'hang' | 'crash' | 'noresult';
   failAttempts?: number; hangAttempts?: number; grandchild?: boolean; echoArgs?: boolean; costUsd?: number;
+  /** Models (the --model argument) that answer with a usage-limit error, exit 1; limitText overrides the message. */
+  limitModels?: string[]; limitText?: string;
   plan?: unknown; planRaw?: string; // planner-mode overrides
   // reviewer-mode overrides: verdict object or verdict name; request changes while attempt <= reviewAttempts
   review?: unknown; reviewRaw?: string; reviewAttempts?: number; reviewHang?: boolean; reviewWrite?: Record<string, string>;
@@ -61,6 +63,10 @@ async function main() {
   }
   out({ type: 'message', text: `mock agent started (${planning ? 'planner' : `attempt ${attempt}`}) in ${path.basename(process.cwd())}` });
   if (d.echoArgs) out({ type: 'message', text: JSON.stringify(process.argv.slice(2)) });
+  const model = process.argv[process.argv.indexOf('--model') + 1];
+  if (process.argv.includes('--model') && d.limitModels?.includes(model!)) {
+    out({ type: 'error', text: d.limitText ?? "You've hit your usage limit. Try again in 2 hours." }); process.exit(1);
+  }
   if (d.grandchild) {
     const c = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], { stdio: 'ignore', windowsHide: true });
     out({ type: 'message', text: `grandchild pid ${c.pid}` });

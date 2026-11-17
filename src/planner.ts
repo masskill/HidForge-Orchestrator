@@ -182,6 +182,7 @@ export class Planner {
       if (r.killReason === 'canceled') { store.updatePlan(plan.id, { status: 'canceled', output }); return; }
       const failure = r.killReason ?? (r.code !== 0 ? `agent exited with code ${r.code}` : !r.result ? 'agent exited without a result event'
         : r.result.isError ? `agent reported an error: ${r.result.text.slice(0, 500)}` : null);
+      if (failure && !r.killReason) this.orch.noteLimit(plan.provider, [failure, ...out.slice(-20)].join(NL), { projectId: p.id });
       if (failure) { store.updatePlan(plan.id, { status: 'failed', error: failure, output, usage: r.result?.usage ?? null }); return; }
       const parsed = parsePlan([r.result!.text, r.messages.join(''), r.messages.join('\n')], new Set(existing.map((t) => t.id)), maxTasks);
       const hint = r.messages.join('').trim() || !out.length ? '' : ` (last agent output: ${out.at(-1)!.slice(0, 300)})`;

@@ -48,6 +48,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       return { ok: true };
     }],
     ['GET', /^\/api\/agents$/, (_m, _b, u) => orch.registry.status(u.searchParams.get('refresh') === '1')],
+    ['POST', /^\/api\/agents\/([\w-]+)\/resume$/, (m) => orch.resumeAgent(m[1]!)],
     ['GET', /^\/api\/agents\/([\w-]+)\/models$/, async (m) => {
       const a = orch.registry.get(m[1]!);
       if (!a) throw new BadRequest(`unknown agent ${m[1]}`);

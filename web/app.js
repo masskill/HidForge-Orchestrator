@@ -53,7 +53,10 @@ async function api(method, path, body) {
 }
 const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, 'danger'); } };
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
-const agentState = (a) => (a.apiOnly && a.auth === 'missing' ? ['потрібен ключ API', 'neutral'] : !a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
+/** "14:05" today, "18.11 14:05" on another day. */
+const untilText = (iso) => { const d = new Date(iso); const hm = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' })} ${hm}`; };
+const agentState = (a) => (a.paused ? [`ліміт до ${untilText(a.paused.until)}`, 'warning'] : a.apiOnly && a.auth === 'missing' ? ['потрібен ключ API', 'neutral'] : !a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
   : a.auth === 'unknown' ? ['авторизація невідома', 'warning'] : ['готовий', 'success']);
 /** The Mock agent is a demo tool: shown only in a project that already uses it (the demo project). */
 const usesMock = () => state.tasks.some((t) => t.provider === 'mock');
@@ -393,7 +396,7 @@ const ACTIVITY_FILTERS = [
 ];
 const EVENT_LABELS = {
   'project.created': 'Проєкт створено', 'task.created': 'Задачу створено', 'task.deleted': 'Задачу видалено',
-  'task.status': 'Статус задачі', 'task.routed': 'Маршрутизація', 'task.evidence': 'Докази',
+  'task.status': 'Статус задачі', 'task.routed': 'Маршрутизація', 'agent.paused': 'Ліміт агента', 'agent.resumed': 'Ліміт агента', 'task.waiting': 'Очікування', 'task.evidence': 'Докази',
   'run.started': 'Запуск агента', 'run.output': 'Вивід агента', 'run.recovered': 'Відновлення запуску',
   'review.started': 'AI-рецензія', 'review.status': 'Статус рецензії', 'review.output': 'Вивід рецензента',
   'plan.started': 'Планування', 'plan.status': 'Статус плану', 'plan.output': 'Вивід планера',
@@ -424,6 +427,9 @@ function activitySummary(e) {
     case 'task.status': return withNote(`статус → ${STATUS_LABEL[d.to] || d.to || 'невідомий'}`);
     case 'task.routed': return withNote(`Призначено: ${[d.provider || d.to || 'автовибір', d.model, d.effort].filter(Boolean).join(' · ')}${d.link ? ` (ланка ${d.link} з ${d.of})` : ''}`);
     case 'task.evidence': return withNote(d.summary || 'Додано результати перевірки');
+    case 'agent.paused': return `${d.agent}: вичерпано ліміт, пауза до ${d.until ? untilText(d.until) : '—'}`;
+    case 'agent.resumed': return `${d.agent}: паузу знято`;
+    case 'task.waiting': return `Чекає, поки агенти знову будуть доступні${d.until ? ` (до ${untilText(d.until)})` : ''}`;
     case 'run.started': return `Агент: ${[d.provider || d.command?.split(/[\\/]/).pop() || 'невідомий', d.model, d.effort].filter(Boolean).join(' · ')} · спроба #${d.attempt ?? '—'}`;
     case 'run.recovered': return withNote('Відновлено перерваний запуск');
     case 'review.started': return `Рецензент: ${[d.provider || 'невідомий', d.model, d.effort].filter(Boolean).join(' · ')} · спроба #${d.attempt ?? '—'}`;
@@ -1213,7 +1219,10 @@ function agentsPage() {
         status: Badge(label, tone),
         body: h('div', { class: 'stack' },
           a.mock ? h('div', { class: 'mockflag' }, 'ДЕМО-АГЕНТ — НЕ СПРАВЖНІЙ AI') : null,
-          a.reason ? h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, a.reason) : null,
+          a.paused ? h('div', { class: 'stack' },
+            h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, `Вичерпано ліміт використання — HidForge не дає цьому агенту нових задач до ${untilText(a.paused.until)}; їх беруть наступні за таблицею. Відповідь CLI: «${a.paused.reason}»`),
+            h('div', { class: 'row' }, SecondaryButton({ size: 'sm', icon: 'play', onClick: act(async () => { await api('POST', `/api/agents/${a.id}/resume`); await loadAgents(); render(); toast(`${a.name}: паузу знято`, 'success'); }) }, 'Зняти паузу')))
+            : a.reason ? h('div', { class: 'text-2 wrap', style: 'font-size:var(--fs-sm)' }, a.reason) : null,
           Disclosure('Можливості й примітки',
             h('div', { class: 'row' }, ...Object.entries(a.capabilities).map(([k, v]) => PermissionChip(k, v))),
             a.notes.length ? h('ul', { class: 'muted', style: 'margin:0;padding-left:18px;font-size:var(--fs-sm)' }, ...a.notes.map((n) => h('li', {}, n))) : null)),

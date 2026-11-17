@@ -18,7 +18,7 @@ export class MockAdapter implements AgentAdapter {
     return { headless: 'supported', streamEvents: 'supported', cancel: 'supported', questions: 'unsupported', usage: 'supported', modelSelect: 'unsupported', readOnlyMode: 'unsupported' };
   }
   notes() { return ['Does not call any AI. Behaviour is controlled by an `@mock {json}` line in the task description.']; }
-  buildInvocation(ctx: { prompt: string }) { return { command: process.execPath, args: [MOCK_SCRIPT], stdin: ctx.prompt }; }
+  buildInvocation(ctx: { prompt: string; model?: string | null }) { return { command: process.execPath, args: [MOCK_SCRIPT, ...(ctx.model ? ['--model', ctx.model] : [])], stdin: ctx.prompt }; }
   parseLine(line: string): AgentEvent | null {
     try {
       const o = JSON.parse(line) as { type: string; text?: string; ok?: boolean; usage?: Record<string, number> };
@@ -52,9 +52,21 @@ export class AgentRegistry {
 
   get(id: string): AgentAdapter | undefined { return this.adapters.get(id); }
 
+  private pausedOf: (id: string) => { until: string; reason: string } | null = () => null;
+  /** The orchestrator's pause list (agents that hit their usage limit). A paused agent reports unavailable, so routing chains,
+   *  auto selection, the planner, the chat and the reviewer all skip it until the pause ends. */
+  setPauses(fn: (id: string) => { until: string; reason: string } | null): void { this.pausedOf = fn; }
+
   /** Detect every adapter. A failing adapter never breaks the others. */
   async status(refresh = false): Promise<AgentStatus[]> {
-    if (this.cache && !refresh) return this.cache;
+    if (!this.cache || refresh) await this.detectAll();
+    return this.cache!.map((s) => {
+      const p = s.available ? this.pausedOf(s.id) : null;
+      return p ? { ...s, available: false, paused: p, reason: `usage limit reached — paused until ${p.until}` } : s;
+    });
+  }
+
+  private async detectAll(): Promise<void> {
     this.cache = await Promise.all([...this.adapters.values()].map(async (a): Promise<AgentStatus> => {
       const base = { id: a.id, name: a.name, mock: a.mock, apiOnly: a.apiOnly === true, capabilities: a.capabilities(), notes: a.notes() };
       try {
@@ -66,7 +78,6 @@ export class AgentRegistry {
         return { ...base, installed: false, version: null, auth: 'unknown', available: false, reason: `detection error: ${(e as Error).message}` };
       }
     }));
-    return this.cache;
   }
 
   /** Rule-based auto selection: first available provider in the policy's order. */

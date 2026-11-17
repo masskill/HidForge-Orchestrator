@@ -243,6 +243,7 @@ export class Reviewer {
       const failure = r.killReason ?? (r.code !== 0 ? `agent exited with code ${r.code}` : !r.result ? 'agent exited without a result event'
         : r.result.isError ? `agent reported an error: ${r.result.text.slice(0, 500)}` : null);
       const usage = r.result?.usage ?? null;
+      if (failure && !r.killReason) this.orch.noteLimit(provider, [failure, ...out.slice(-20)].join(NL), { projectId: p.id, taskId: t.id });
       if (failure) { this.finish(t.id, { ...base, status: 'failed', error: failure, usage }); return; }
       const parsed = parseReview([r.result!.text, r.messages.join(''), r.messages.join(NL)]);
       if (!parsed.ok) {

@@ -19,6 +19,7 @@ import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
 import { Chat } from './chat.ts';
 import { projectCosts, cellStats } from './costs.ts';
+import { detectLimit, type LimitHit } from './limits.ts';
 import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_CEILING, DEFAULT_MATRIX, resolveChain, reorderByStats, effortFlagFor, type Effort, type Link, type Matrix } from './routing.ts';
 
 export interface OrchestratorOptions {
@@ -36,7 +37,12 @@ interface Handle {
   startedAt: number; lastOutput: number; timeoutMs: number;
   result: AgentEvent | null; killReason: string | null; canceled: boolean; done: boolean;
   exited: Promise<void>;
+  /** Last output lines, to recognise a usage-limit failure. */
+  tail: string[];
 }
+
+/** An agent HidForge stopped using after it hit its usage limit. */
+export interface AgentPause { until: string; reason: string; at: string }
 
 export class Orchestrator {
   readonly store: Store;
@@ -72,6 +78,43 @@ export class Orchestrator {
     this.planner = new Planner(this);
     this.reviewer = new Reviewer(this);
     this.chat = new Chat(this);
+    this.registry.setPauses((id) => this.pauses()[id] ?? null);
+  }
+
+  // ------------------------------------------------------------------ usage limits
+  /** Agents paused after a usage limit, still in force. Expired pauses are dropped. */
+  pauses(): Record<string, AgentPause> {
+    const all = this.store.getSetting<Record<string, AgentPause>>('agentPauses', {});
+    const now = new Date().toISOString();
+    const live = Object.fromEntries(Object.entries(all).filter(([, p]) => p.until > now));
+    if (Object.keys(live).length !== Object.keys(all).length) this.store.setSetting('agentPauses', live);
+    return live;
+  }
+  pauseAgent(agent: string, hit: Pick<LimitHit, 'until' | 'reason'>, ctx: { projectId?: number; taskId?: number } = {}): AgentPause {
+    const pause = { until: hit.until, reason: hit.reason, at: new Date().toISOString() };
+    this.store.setSetting('agentPauses', { ...this.pauses(), [agent]: pause });
+    this.store.event({ projectId: ctx.projectId ?? null, taskId: ctx.taskId ?? null, type: 'agent.paused', data: { agent, ...pause } });
+    return pause;
+  }
+  resumeAgent(agent: string): { ok: true } {
+    const { [agent]: gone, ...rest } = this.pauses();
+    this.store.setSetting('agentPauses', rest);
+    if (gone) this.store.event({ type: 'agent.resumed', data: { agent } });
+    return { ok: true };
+  }
+  /** A failed run's output says the agent is out of its usage limit: pause the agent everywhere. Returns the hit or null. */
+  noteLimit(agent: string, output: string, ctx: { projectId?: number; taskId?: number } = {}): LimitHit | null {
+    const hit = detectLimit(output);
+    if (hit) this.pauseAgent(agent, hit, ctx);
+    return hit;
+  }
+  /** Nothing can take the task until a pause ends: keep it queued and look again then. */
+  private waitForPause(t: Task, why: string): false {
+    const until = Object.values(this.pauses()).map((p) => p.until).sort()[0];
+    if (!until) return false;
+    this.store.patchTask(t.id, { notBefore: until });
+    this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.waiting', data: { until, why } });
+    return false;
   }
 
   get maxConcurrent(): number { return this.store.getSetting('maxConcurrentAgents', this.opts.maxConcurrent); }
@@ -406,11 +449,22 @@ export class Orchestrator {
         const base = table[this.routingPolicy].filter((x) => !ro.has(x));
         const order = tpl.providers.length ? [...base.filter((x) => tpl.providers.includes(x)), ...tpl.providers.filter((x) => !base.includes(x) && !ro.has(x))] : base;
         const picked = await this.registry.pick(this.routingPolicy, { ...table, [this.routingPolicy]: order });
+        if (!picked && Object.keys(this.pauses()).length) return this.waitForPause(t, 'every suitable agent is paused after a usage limit');
         if (!picked) { this.failTask(t, `no available agent for routing policy '${this.routingPolicy}'${tpl.providers.length ? ` among agents allowed for role ${t.assignedRole} (${tpl.providers.join(', ')})` : ''}`); return false; }
         t = this.store.patchTask(t.id, { provider: picked });
         used = { ...used, provider: picked };
         this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: picked, policy: this.routingPolicy } });
       }
+    }
+    const pause = this.pauses()[used.provider];
+    if (pause) {
+      const write = t.policy !== 'read-only' && !tpl.readOnly;
+      const alt = (await this.chainFor(t.category ?? 'backend', t.complexity, { write, roleProviders: tpl.providers }))[0];
+      if (!alt) return this.waitForPause(t, `${used.provider} is paused after a usage limit and no other agent can take the task`);
+      const flag = effortFlagFor(alt) === null ? null : (t.effort ?? alt.effort);
+      this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: alt.agent, model: alt.model, effort: flag ?? alt.effort,
+        category: t.category, complexity: t.complexity ?? 'medium', reason: `${used.provider} is paused until ${pause.until} (usage limit): handed to the best available link` } });
+      used = { provider: alt.agent, model: alt.model, effort: flag ?? alt.effort, flag };
     }
     if (tpl.providers.length && !tpl.providers.includes(used.provider)) { this.failTask(t, `role ${t.assignedRole} may only use: ${tpl.providers.join(', ')} (task asks for ${used.provider})`); return false; }
     if (tpl.readOnly && t.policy !== 'read-only') {
@@ -476,7 +530,7 @@ export class Orchestrator {
     const h: Handle = {
       run, taskId: t.id, workspace, child, adapter, startedAt: Date.now(), lastOutput: Date.now(),
       timeoutMs: t.timeoutSec * 1000, result: null, killReason: null, canceled: false, done: false,
-      exited: new Promise<void>((r) => { resolveExit = r; }),
+      exited: new Promise<void>((r) => { resolveExit = r; }), tail: [],
     };
     this.handles.set(run.id, h);
     if (child.pid) this.store.setRunPid(run.id, child.pid);
@@ -489,7 +543,9 @@ export class Orchestrator {
       const ev = stream === 'stdout' ? adapter.parseLine(line) : (line.trim() ? { kind: 'log' as const, text: line } : null);
       if (!ev) return;
       if (ev.kind === 'result') h.result = ev;
-      this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.output', data: { stream, kind: ev.kind, text: maskSecrets(ev.text).slice(0, 8000) } });
+      const text = maskSecrets(ev.text).slice(0, 8000);
+      h.tail.push(text.slice(0, 1000)); if (h.tail.length > 20) h.tail.shift();
+      this.store.event({ projectId: p.id, taskId: t.id, runId: run.id, type: 'run.output', data: { stream, kind: ev.kind, text } });
     };
     createInterface({ input: child.stdout! }).on('line', (l) => emit('stdout', l));
     createInterface({ input: child.stderr! }).on('line', (l) => emit('stderr', l));
@@ -529,10 +585,22 @@ export class Orchestrator {
     this.store.endRun(h.run.id, failure ? (h.killReason ? 'timeout' : 'failed') : 'succeeded', { exitCode: code, error: failure, usage });
     const t = this.store.getTask(h.taskId);
     if (t.status !== 'running') return; // canceled meanwhile
+    const hit = failure && !h.killReason ? this.noteLimit(h.run.provider, [failure, ...h.tail].join('\n'), { projectId: t.projectId, taskId: t.id }) : null;
+    if (hit) { this.limitHandover(t, h.run.provider, hit); return; }
     if (failure) { this.failOrRetry(t, failure); return; }
     this.store.addEvidence(t.id, { kind: 'run', ok: true, summary: `Attempt ${t.attempts} finished (${h.adapter.mock ? 'MOCK' : h.adapter.name})`, detail: h.result?.text });
     this.store.setStatus(t.id, 'review', { artifacts: { ...t.artifacts, gate: undefined } }, 'worker finished, running gates');
     await this.runGates(t.id);
+  }
+
+  /** The agent ran out of its usage limit: the attempt is not counted and the task goes straight back to the queue, where routing
+   *  skips the paused agent — the next link of the chain takes over (or the task waits for the pause to end). */
+  private limitHandover(t: Task, agent: string, hit: LimitHit): void {
+    const n = Number(t.artifacts.limitHandovers ?? 0) + 1;
+    this.store.addEvidence(t.id, { kind: 'run', ok: false, detail: hit.reason,
+      summary: `Attempt ${t.attempts}: ${agent} hit its usage limit (paused until ${hit.until}). The attempt is not counted; the next agent takes over` });
+    if (n > 6) { this.failOrRetry(t, `usage limit: ${hit.reason}`); return; } // guard against a loop of misread limits
+    this.store.setStatus(t.id, 'queued', { attempts: Math.max(0, t.attempts - 1), notBefore: null, artifacts: { ...t.artifacts, limitHandovers: n } }, `${agent} usage limit: handing over`);
   }
 
   private failOrRetry(t: Task, reason: string): void {
