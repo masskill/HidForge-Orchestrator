@@ -164,7 +164,13 @@ export const CURSOR: CliSpec = {
 
 export const AGY: CliSpec = {
   id: 'agy', name: 'Google Antigravity CLI', bin: 'agy',
-  async auth() { return { auth: 'unknown', reason: 'agy has no documented non-interactive auth status command' }; },
+  // agy has no auth-status command; `agy models` fetches the list from the account, so a non-empty list means logged in.
+  async auth() {
+    const r = await run('agy', ['models'], { timeoutMs: 60_000 });
+    if (r.code === 0 && parseModelList(r.stdout, MODEL_LINE.agy).length) return { auth: 'ok', reason: null };
+    if (/log ?in|sign ?in|auth/i.test(r.stdout + r.stderr)) return { auth: 'missing', reason: 'run `agy` once and sign in' };
+    return { auth: 'unknown', reason: '`agy models` returned no models; could not determine login state' };
+  },
   caps: { headless: 'supported', streamEvents: 'supported', cancel: 'supported', questions: 'unsupported', usage: 'supported', modelSelect: 'supported', readOnlyMode: 'supported' },
   notes: [
     'Runs `agy --input-format stream-json --output-format stream-json --mode accept-edits|plan --sandbox -p=`, prompt as one stdin frame (format from cezar live captures of agy 1.4).',

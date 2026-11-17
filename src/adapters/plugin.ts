@@ -3,6 +3,7 @@
 // Safety is enforced at load time: prompt only via stdin, no permission-bypass flags, bare command names only.
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { run } from '../proc.ts';
 import { CliAdapter } from './cli.ts';
 import type { AgentEvent, Capabilities, ModelInfo } from './types.ts';
@@ -18,7 +19,8 @@ export interface EventRule {
 export interface PluginSpec {
   id: string; name: string; bin: string; verified?: boolean; notes?: string[];
   args: { base?: string[]; write?: string[]; readOnly?: string[]; model?: string[] };
-  auth?: { args: string[]; hint?: string };
+  /** `args`: a command whose exit code 0 means logged in. `files` (relative to the home dir) / `env`: logged in if any exists or is set; only existence is checked, contents are never read. */
+  auth?: { args?: string[]; files?: string[]; env?: string[]; hint?: string };
   models?: { args: string[]; pattern: string };
   events: EventRule[];
 }
@@ -58,6 +60,10 @@ export function validatePlugin(raw: unknown): PluginSpec {
     if ((l as string[]).some((a) => a.includes('{prompt}'))) fail(`${where}: the prompt always goes via stdin; {prompt} is not supported`);
     if (where !== 'args.model' && (l as string[]).some((a) => a.includes('{model}'))) fail(`${where}: {model} is allowed only in args.model`);
   }
+  for (const [where, l] of [['auth.files', s.auth?.files], ['auth.env', s.auth?.env]] as const) {
+    if (l !== undefined && (!Array.isArray(l) || l.some((a) => typeof a !== 'string' || !a || path.isAbsolute(a) || a.split(/[\\/]/).includes('..')))) fail(`${where} must be an array of relative names without ".."`);
+  }
+  if (s.auth && !s.auth.args && !s.auth.files && !s.auth.env) fail('auth needs args, files or env');
   if (s.models && (typeof s.models.pattern !== 'string' || (() => { try { return !/\((?!\?)/.test(s.models.pattern) || !new RegExp(s.models.pattern); } catch { return true; } })())) fail('models.pattern must be a valid regular expression with a capture group for the model id');
   if (!Array.isArray(s.events) || !s.events.length) fail('events must be a non-empty array of rules');
   for (const [i, r] of s.events.entries()) {
@@ -84,9 +90,12 @@ export function pluginAdapter(s: PluginSpec): CliAdapter {
     id: s.id, name: s.name, bin: s.bin, caps,
     notes: [`JSON plugin${s.verified ? '' : ' — NOT verified on a real CLI by HidForge; flags come from the CLI docs'}.`, ...(s.notes ?? [])],
     async auth() {
-      if (!s.auth) return { auth: 'unknown', reason: null };
-      const r = await run(s.bin, s.auth.args, { timeoutMs: 30_000 });
-      return r.code === 0 ? { auth: 'ok', reason: null } : { auth: 'missing', reason: s.auth.hint ?? `\`${s.bin} ${s.auth.args.join(' ')}\` failed` };
+      const a = s.auth;
+      if (!a) return { auth: 'unknown', reason: null };
+      if (a.env?.some((k) => process.env[k]) || a.files?.some((f) => existsSync(path.join(homedir(), f)))) return { auth: 'ok', reason: null };
+      if (!a.args) return { auth: 'missing', reason: a.hint ?? 'no login found' };
+      const r = await run(s.bin, a.args, { timeoutMs: 30_000 });
+      return r.code === 0 ? { auth: 'ok', reason: null } : { auth: 'missing', reason: a.hint ?? `\`${s.bin} ${a.args.join(' ')}\` failed` };
     },
     build: (c) => ({
       args: [...(s.args.base ?? []), ...((c.policy === 'read-only' ? s.args.readOnly : s.args.write) ?? []),

@@ -27,6 +27,29 @@ test('plugin validation rejects unsafe or broken specs', () => {
   bad({ models: { args: ['m'], pattern: '^\\S+$' } }, /capture group/);
 });
 
+test('plugin auth by file/env existence: never reads them, rejects escaping paths', async () => {
+  const bad = (auth: object, re: RegExp) => assert.throws(() => validatePlugin({ ...base, auth }), re);
+  bad({ files: ['../x'] }, /without/);
+  bad({ files: ['C:\\x'] }, /without/);
+  bad({ files: ['a\\..\\b'] }, /without/);
+  bad({ hint: 'x' }, /args, files or env/);
+  const home = tmpRoot();
+  mkdirSync(path.join(home, '.cli'), { recursive: true });
+  writeFileSync(path.join(home, '.cli', 'creds'), 'x');
+  const old = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
+  process.env.USERPROFILE = home; process.env.HOME = home;
+  try {
+    const auth = (a: object) => pluginAdapter(validatePlugin({ ...base, auth: a })).checkAuth();
+    assert.equal((await auth({ files: ['.cli/creds'] })).auth, 'ok');
+    assert.deepEqual(await auth({ files: ['.cli/none'], hint: 'log in' }), { auth: 'missing', reason: 'log in' });
+    process.env.HF_TEST_KEY = '1';
+    assert.equal((await auth({ files: ['.cli/none'], env: ['HF_TEST_KEY'] })).auth, 'ok');
+  } finally {
+    delete process.env.HF_TEST_KEY;
+    for (const [k, v] of Object.entries(old)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
+
 test('shipped Gemini CLI and OpenCode specs load, keep the prompt on stdin and map events', () => {
   const r = loadPlugins([APP_PLUGINS_DIR]);
   assert.deepEqual(r.errors, []);

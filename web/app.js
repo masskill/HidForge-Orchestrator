@@ -46,6 +46,9 @@ const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
 const agentState = (a) => (!a.installed ? ['не встановлено', 'danger'] : a.auth === 'missing' ? ['немає авторизації', 'danger']
   : a.auth === 'unknown' ? ['авторизація невідома', 'warning'] : ['готовий', 'success']);
+/** The Mock agent is a demo tool: shown only in a project that already uses it (the demo project). */
+const usesMock = () => state.tasks.some((t) => t.provider === 'mock');
+const agentList = () => (state.agents || []).filter((a) => !a.mock || usesMock());
 const providerLabel = (t) => (t.provider === 'mock' ? h('span', { class: 'mockflag' }, 'MOCK') : t.provider);
 const REVIEW_VERDICT = { approve: ['схвалено', 'success'], request_changes: ['потрібні зміни', 'warning'], reject: ['відхилено', 'danger'] };
 const REVIEW_STATUS = { running: ['рецензує…', 'info'], failed: ['збій рецензії', 'danger'], canceled: ['рецензію зупинено', 'neutral'] };
@@ -327,7 +330,7 @@ function overviewPage() {
       PanelCard({ title: 'Остання активність', subtitle: 'Зміни статусів задач' },
         ActivityFeed(state.activity.map((e) => ({ ts: e.ts, content: [h('a', { href: `#/tasks/${e.taskId}` }, `#${e.taskId}`), ` ${byId[e.taskId]?.title ?? ''} `, h('span', { class: 'muted' }, `${STATUS_LABEL[e.data.from] ?? e.data.from} → `), STATUS_LABEL[e.data.to] ?? e.data.to] })))),
       PanelCard({ title: 'Агенти', subtitle: 'Встановлені CLI та їхній стан', actions: GhostButton({ size: 'sm', onClick: () => go('#/agents') }, 'Детальніше') },
-        state.agents ? h('div', { class: 'stack' }, ...state.agents.map((a) => { const [l, tone] = agentState(a); return h('div', { class: 'row between' }, h('span', {}, a.name, a.version ? h('span', { class: 'muted' }, ` ${a.version}`) : null), Badge(l, tone)); }))
+        state.agents ? h('div', { class: 'stack' }, ...agentList().map((a) => { const [l, tone] = agentState(a); return h('div', { class: 'row between' }, h('span', {}, a.name, a.version ? h('span', { class: 'muted' }, ` ${a.version}`) : null), Badge(l, tone)); }))
           : h('p', { class: 'muted' }, 'Перевірка агентів…'))),
   );
 }
@@ -746,13 +749,13 @@ function quickActions(t) {
 
 function taskForm(t) {
   const isNew = !t;
-  t = t || { title: '', description: '', acceptanceCriteria: '', dependsOn: [], assignedRole: 'Backend', provider: 'mock', model: '', policy: 'workspace-write', allowedPaths: [], verifyCommands: [], maxAttempts: 2, timeoutSec: 1800 };
+  t = t || { title: '', description: '', acceptanceCriteria: '', dependsOn: [], assignedRole: 'Backend', provider: usesMock() ? 'mock' : 'auto', model: '', policy: 'workspace-write', allowedPaths: [], verifyCommands: [], maxAttempts: 2, timeoutSec: 1800 };
   const f = {
     title: TextInput({ value: t.title, required: true }),
     description: Textarea(t.description, { class: 'prose', style: 'min-height:110px' }),
     acceptanceCriteria: Textarea(t.acceptanceCriteria, { class: 'prose' }),
     assignedRole: Select(ROLES, t.assignedRole),
-    provider: Select([['auto', 'auto (за політикою)'], ...(state.agents || []).map((a) => [a.id, `${a.id}${a.available ? '' : ' (недоступний)'}`])], t.provider),
+    provider: Select([['auto', 'auto (за політикою)'], ...agentList().map((a) => [a.id, `${a.id}${a.available ? '' : ' (недоступний)'}`])], t.provider),
     model: null,
     maxBudgetUsd: TextInput({ type: 'number', min: 0.01, step: 0.01, value: t.maxBudgetUsd ?? '', placeholder: 'без ліміту' }),
     policy: Select([['workspace-write', 'запис у worktree'], ['read-only', 'лише читання']], t.policy),
@@ -919,7 +922,7 @@ function plannerPage() {
   const p = state.project;
   const plan = state.plans[0];
   const busy = plan?.status === 'running';
-  const planners = (state.agents || []).filter((a) => a.available && (a.mock || a.capabilities.readOnlyMode === 'supported'));
+  const planners = agentList().filter((a) => a.available && (a.mock || a.capabilities.readOnlyMode === 'supported'));
   const goal = Textarea(p.goal, { class: 'prose', placeholder: 'Опишіть, що має бути зроблено…', 'aria-label': 'Ціль' });
   const prov = Select([['auto', 'auto (за політикою)'], ...planners.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : a.name])], 'auto');
   const model = ModelInput(prov, null);
@@ -962,7 +965,7 @@ function planResult(plan) {
       h('div', { class: 'row' }, SecondaryButton({ icon: 'tasks', onClick: () => { state.filter = 'draft'; go('#/tasks'); } }, 'До чернеток'), runPlanButton()));
   }
   const d = plan.plan;
-  const applyProv = Select([['auto', 'auto (за політикою)'], ...(state.agents || []).filter((a) => a.available).map((a) => [a.id, a.mock ? 'mock' : a.id])], plan.provider === 'mock' ? 'mock' : 'auto', { class: 'w-auto' });
+  const applyProv = Select([['auto', 'auto (за політикою)'], ...agentList().filter((a) => a.available).map((a) => [a.id, a.mock ? 'mock' : a.id])], plan.provider === 'mock' ? 'mock' : 'auto', { class: 'w-auto' });
   return PanelCard({ flush: true, title: `Запропонований план #${plan.id}`, subtitle: d.summary || `${d.tasks.length} задач` },
     d.risks.length ? h('div', { style: 'padding:var(--s-4) var(--s-5) 0' }, h('div', { class: 'callout' }, h('strong', {}, 'Ризики'), h('ul', { style: 'margin:0;padding-left:18px' }, ...d.risks.map((r) => h('li', {}, r))))) : null,
     Table({
@@ -1005,7 +1008,7 @@ function agentsPage() {
   mount(
     PageHeader({ title: 'Агенти', subtitle: 'CLI агентів програмування на цьому комп\'ютері. Недоступний агент не зупиняє проєкт — задачі йдуть на інші за політикою автовибору.',
       actions: SecondaryButton({ icon: 'refresh', onClick: refresh, disabled: !state.agents }, 'Перевірити знову') }),
-    state.agents ? h('div', { class: 'grid cards' }, ...state.agents.map((a) => {
+    state.agents ? h('div', { class: 'grid cards' }, ...agentList().map((a) => {
       const [label, tone] = agentState(a);
       return ItemCard({
         icon: a.mock ? 'terminal' : 'agents', off: !a.available, title: a.name, subtitle: a.version || (a.installed ? 'версія невідома' : 'не знайдено в PATH'),
@@ -1225,7 +1228,7 @@ function trustSettings() {
 }
 function reviewSettings(p) {
   const pol = p.reviewPolicy || { mode: 'off', provider: 'auto', model: null };
-  const reviewers = (state.agents || []).filter((a) => a.mock || a.capabilities.readOnlyMode === 'supported');
+  const reviewers = (state.agents || []).filter((a) => !a.mock || usesMock() || pol.provider === 'mock').filter((a) => a.mock || a.capabilities.readOnlyMode === 'supported');
   const mode = Select([['off', 'Вимкнено'], ['advisory', 'Дорадчий — лише показує вердикт'], ['required', 'Обов\'язковий — merge лише після «схвалено»']], pol.mode);
   const prov = Select([['auto', 'auto (за політикою)'], ...reviewers.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : `${a.name}${a.available ? '' : ' (недоступний)'}`])], pol.provider);
   const model = ModelInput(prov, pol.model);

@@ -5,8 +5,9 @@
   "verified": false,
   "notes": [
     "Headless: prompt via stdin (non-TTY), `--output-format stream-json`; write tasks `--approval-mode auto_edit`, read-only `--approval-mode plan` (google-gemini/gemini-cli docs/cli/cli-reference.md). `--yolo` / `--approval-mode yolo` are never used.",
-    "Auth uses the CLI's own login (`gemini` once interactively); HidForge cannot check it, so status shows auth: unknown."
+    "Auth uses the CLI's own login (`gemini` once interactively). HidForge only checks that ~/.gemini/oauth_creds.json exists or an API-key variable is set; it never reads them."
   ],
+  "auth": { "files": [".gemini/oauth_creds.json"], "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI"], "hint": "run `gemini` once and log in" },
   "args": {
     "base": ["--output-format", "stream-json"],
     "write": ["--approval-mode", "auto_edit"],

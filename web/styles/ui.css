@@ -75,10 +75,10 @@ svg.icon { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: no
 .report-task-link:hover { text-decoration: underline; }
 .item { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4) var(--s-5); display: grid; gap: var(--s-3); align-content: start; }
 .item:hover { border-color: var(--border-strong); }
-.item-head { display: flex; align-items: center; gap: var(--s-3); }
+.item-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
 .item-head .ic { width: 40px; height: 40px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .item-head .ic.off { background: var(--bg-panel-alt); color: var(--text-muted); }
-.item-head .t { min-width: 0; flex: 1; }
+.item-head .t { min-width: 0; flex: 1 1 120px; } /* a long status badge wraps below instead of crushing the title */
 .item-head .t strong { display: block; font-size: var(--fs-lg); }
 .item-head .t span { color: var(--text-muted); font-size: var(--fs-sm); }
 .id { font-family: var(--mono); letter-spacing: var(--tracking-id); font-weight: 700; color: var(--text); }
