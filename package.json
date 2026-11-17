@@ -4,7 +4,9 @@
   "private": true,
   "description": "Local Windows-first orchestrator for AI coding CLI agents",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "node --env-file-if-exists=.env src/main.ts",
     "demo": "node --env-file-if-exists=.env src/main.ts --demo",
@@ -17,5 +19,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.9.0"
   }
 }

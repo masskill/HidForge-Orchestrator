@@ -1191,6 +1191,7 @@ function settingsPage() {
         Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
       PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
     ...(routingSettings() || []),
+    apiSettings(),
     p ? reviewSettings(p) : null,
     rolesSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
@@ -1200,6 +1201,18 @@ function settingsPage() {
         await reloadProject(); toast('Збережено', 'success'); render();
       }) }, 'Зберегти'))) : null,
   );
+}
+/** Paid API fallback: used only for an agent whose CLI is missing or not logged in, and only with the provider's key in .env. */
+function apiSettings() {
+  const s = state.settings;
+  if (!s?.apiKeys) return null;
+  const KEYS = [['ANTHROPIC_API_KEY', 'Claude → Anthropic API'], ['OPENAI_API_KEY', 'Codex → OpenAI API'], ['GEMINI_API_KEY', 'Antigravity → Gemini API']];
+  const toggle = act(async (v) => { await api('PUT', '/api/settings', { apiFallback: v }); await Promise.all([loadSettings(), loadAgents()]); toast(v ? 'Платний API увімкнено як резерв' : 'Платний API вимкнено', 'success'); render(); });
+  return PanelCard({ title: 'Резервний API (платно)', subtitle: 'Якщо CLI агента немає або в ньому не виконано вхід — HidForge може працювати напряму через API провайдера' },
+    h('p', { class: 'text-2', style: 'margin:0' }, 'Поки CLI встановлено й увійдено, використовується тільки CLI. API — запасний шлях: кожен запит оплачується з вашого ключа провайдера. Ключі HidForge не зберігає: впишіть їх у файл .env поруч із HidForge (він не потрапляє в git) і перезапустіть HidForge. API-агент читає й записує файли робочої копії, але не запускає команд — перевірку роблять команди перевірки HidForge.'),
+    h('div', { class: 'stack' }, ...KEYS.map(([k, label]) => h('div', { class: 'row between wrap-row' }, h('span', {}, label, ' ', h('span', { class: 'mono muted' }, k)),
+      s.apiKeys[k] ? Badge('ключ є', 'success') : Badge('ключа немає', 'neutral')))),
+    Toggle({ label: 'Дозволити платний API, коли CLI недоступний', checked: s.apiFallback === true, onChange: (v) => toggle(v) }));
 }
 /** Auto-routing: effort ceiling, opt-in Fable link, self-learning, agents that cannot write, and the editable priority table. */
 function routingSettings() {

@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AGY, CLAUDE, CODEX, CURSOR, CliAdapter } from './cli.ts';
+import { API_VENDORS, ApiFallbackAdapter } from './api.ts';
 import type { AgentAdapter, AgentEvent, AgentStatus, Capabilities } from './types.ts';
 
 const here = fileURLToPath(import.meta.url);
@@ -30,8 +31,10 @@ export class MockAdapter implements AgentAdapter {
 /** Shipped JSON plugin specs (examples); users add their own to <dataDir>/plugins. */
 export const APP_PLUGINS_DIR = path.join(path.dirname(here), '..', '..', 'plugins');
 
-export function defaultAdapters(): AgentAdapter[] {
-  return [new MockAdapter(), new CliAdapter(CLAUDE), new CliAdapter(CODEX), new CliAdapter(CURSOR), new CliAdapter(AGY)];
+/** Built-in agents. Claude, Codex and Antigravity fall back to their provider's API when the CLI is unavailable and `allowApi()` is true. */
+export function defaultAdapters(allowApi: () => boolean = () => false): AgentAdapter[] {
+  const cli = (spec: typeof CLAUDE) => (API_VENDORS[spec.id] ? new ApiFallbackAdapter(new CliAdapter(spec), API_VENDORS[spec.id]!, allowApi) : new CliAdapter(spec));
+  return [new MockAdapter(), cli(CLAUDE), cli(CODEX), new CliAdapter(CURSOR), cli(AGY)];
 }
 
 export type RoutingPolicy = 'cost-first' | 'balanced' | 'quality-first';

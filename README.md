@@ -8,7 +8,7 @@ You describe a goal. HidForge turns it into a graph of tasks (DAG) and runs seve
 
 Everything runs on your own computer. HidForge uses the CLIs you have already installed and signed in to — it never asks for, stores or forwards API keys, tokens or cookies.
 
-> **Status: v0.5 (beta).** Overall progress is 94% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
+> **Status: v0.5 (beta).** Overall progress is 93% ([ROADMAP](docs/ROADMAP.md)). What was verified and how: [TEST_REPORT](docs/TEST_REPORT.md).
 
 ---
 

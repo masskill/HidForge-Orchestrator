@@ -8,6 +8,7 @@ import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, type HfEvent } from './store.ts';
 import { git } from './workspace.ts';
 import { DEFAULT_ROUTING } from './adapters/index.ts';
+import { apiKeysPresent } from './adapters/api.ts';
 import { normalizeReviewPolicy } from './reviewer.ts';
 import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contract.ts';
 import { projectCosts, projectRuns, modelStats } from './costs.ts';
@@ -54,9 +55,9 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     }],
     ['GET', /^\/api\/settings$/, () => ({ maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, routingTable: s.getSetting('routingTable', DEFAULT_ROUTING), agentTrust: s.getSetting('agentTrust', {}),
       roles: ROLES, roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, roleDefaults: DEFAULT_ROLE_TEMPLATES, wsl: s.getSetting('wsl', null), ssh: s.getSetting('ssh', null),
-      ...orch.routingSettings(), routing: { categories: CATEGORIES, complexities: COMPLEXITIES, efforts: EFFORTS, defaultMatrix: DEFAULT_MATRIX, fable: FABLE, fableCategories: FABLE_CATEGORIES } })],
+      ...orch.routingSettings(), apiFallback: s.getSetting('apiFallback', false), apiKeys: apiKeysPresent(), routing: { categories: CATEGORIES, complexities: COMPLEXITIES, efforts: EFFORTS, defaultMatrix: DEFAULT_MATRIX, fable: FABLE, fableCategories: FABLE_CATEGORIES } })],
     ['GET', /^\/api\/model-stats$/, () => modelStats(s)],
-    ['PUT', /^\/api\/settings$/, (_m, b) => {
+    ['PUT', /^\/api\/settings$/, async (_m, b) => {
       if (b.maxConcurrentAgents !== undefined) s.setSetting('maxConcurrentAgents', Math.max(1, Math.min(16, Number(b.maxConcurrentAgents) || 1)));
       if (b.routingPolicy !== undefined) {
         if (!['cost-first', 'balanced', 'quality-first'].includes(String(b.routingPolicy))) throw new BadRequest('bad routingPolicy');
@@ -80,6 +81,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
         s.setSetting('effortCeiling', b.effortCeiling);
       }
       for (const k of ['allowFable', 'selfLearning'] as const) if (b[k] !== undefined) s.setSetting(k, b[k] === true);
+      if (b.apiFallback !== undefined) { s.setSetting('apiFallback', b.apiFallback === true); await orch.registry.status(true); }
       if (b.agentReadOnly !== undefined) {
         const t = b.agentReadOnly as Record<string, unknown>;
         if (!t || typeof t !== 'object') throw new BadRequest('agentReadOnly must be an object');
@@ -94,7 +96,7 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
         try { s.setSetting('roleTemplates', normalizeRoleTemplates(b.roleTemplates, (p) => Boolean(orch.registry.get(p)))); }
         catch (e) { throw new BadRequest((e as Error).message); }
       }
-      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}), roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, ...orch.routingSettings() };
+      return { maxConcurrentAgents: orch.maxConcurrent, routingPolicy: orch.routingPolicy, agentTrust: s.getSetting('agentTrust', {}), roleTemplates: { ...DEFAULT_ROLE_TEMPLATES, ...orch.roleTemplates() }, ...orch.routingSettings(), apiFallback: s.getSetting('apiFallback', false) };
     }],
     ['GET', /^\/api\/projects$/, () => s.listProjects()],
     ['POST', /^\/api\/projects$/, (_m, b) => orch.addProject(str(b.repoPath, 'repoPath'), String(b.goal ?? ''))],

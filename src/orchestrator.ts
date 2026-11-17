@@ -60,7 +60,7 @@ export class Orchestrator {
     // Agents: built-ins + JSON plugins (unless a test passes its own), plus WSL copies chosen in settings (applied on restart).
     const plugins = o.adapters ? { adapters: [], errors: [] } : loadPlugins([APP_PLUGINS_DIR, path.join(this.opts.dataDir, 'plugins')]);
     this.pluginErrors = plugins.errors;
-    const base = o.adapters ?? [...defaultAdapters(), ...plugins.adapters];
+    const base = o.adapters ?? [...defaultAdapters(() => this.store.getSetting('apiFallback', false)), ...plugins.adapters];
     const wsl = this.store.getSetting<WslConfig | null>('wsl', null);
     const viaWsl = wsl ? base.filter((a) => wsl.agents.includes(a.id) && !a.mock).map((a) => new WslAdapter(a, wsl.distro)) : [];
     const ssh = this.store.getSetting<SshConfig | null>('ssh', null);
