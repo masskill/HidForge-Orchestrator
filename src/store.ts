@@ -78,6 +78,8 @@ export interface PlanRun {
 export interface ChatMessage {
   id: number; projectId: number; role: 'user' | 'assistant'; text: string;
   provider: string | null; model: string | null; effort: string | null; usage: unknown; error: string | null; createdAt: string;
+  /** Plan proposed in this reply (see Planner.apply), or null. */
+  planId: number | null;
 }
 
 export interface HfEvent { id: number; projectId: number | null; taskId: number | null; runId: number | null; type: string; data: unknown; ts: string }
@@ -133,7 +135,8 @@ function toPlan(r: Row): PlanRun {
 
 function toChat(r: Row): ChatMessage {
   return { id: Number(r.id), projectId: Number(r.project_id), role: r.role as ChatMessage['role'], text: String(r.text), provider: (r.provider as string) ?? null,
-    model: (r.model as string) ?? null, effort: (r.effort as string) ?? null, usage: pj(r.usage, null), error: (r.error as string) ?? null, createdAt: String(r.created_at) };
+    model: (r.model as string) ?? null, effort: (r.effort as string) ?? null, usage: pj(r.usage, null), error: (r.error as string) ?? null, createdAt: String(r.created_at),
+    planId: r.plan_id == null ? null : Number(r.plan_id) };
 }
 
 const TASK_COLUMNS: Record<string, string> = {
@@ -319,10 +322,10 @@ export class Store {
   }
 
   // ---- chat
-  addChatMessage(m: Omit<ChatMessage, 'id' | 'createdAt'>): ChatMessage {
+  addChatMessage(m: Omit<ChatMessage, 'id' | 'createdAt' | 'planId'> & { planId?: number | null }): ChatMessage {
     this.getProject(m.projectId);
-    const r = this.db.prepare('insert into chat_messages (project_id, role, text, provider, model, effort, usage, error, created_at) values (?,?,?,?,?,?,?,?,?) returning *')
-      .get(m.projectId, m.role, m.text, m.provider, m.model, m.effort, m.usage == null ? null : j(m.usage), m.error, now()) as Row;
+    const r = this.db.prepare('insert into chat_messages (project_id, role, text, provider, model, effort, usage, error, plan_id, created_at) values (?,?,?,?,?,?,?,?,?,?) returning *')
+      .get(m.projectId, m.role, m.text, m.provider, m.model, m.effort, m.usage == null ? null : j(m.usage), m.error, m.planId ?? null, now()) as Row;
     return toChat(r);
   }
   listChat(projectId: number, limit = 200): ChatMessage[] {

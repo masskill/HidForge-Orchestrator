@@ -152,7 +152,7 @@ async function reloadProject() {
     api('GET', `/api/events?projectId=${state.projectId}&type=task.status&before=9007199254740991&limit=14`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
   state.projectSummaries[project.id] = projectTaskCounts(tasks);
-  if (state.page === 'chat') await loadChat().catch(() => {});
+  if (state.page === 'chat' || state.page === 'overview') await loadChat().catch(() => {});
   [state.costs, state.planView] = await Promise.all([api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null),
     api('GET', `/api/projects/${state.projectId}/plan-progress`).catch(() => null)]);
 }
@@ -337,6 +337,7 @@ function overviewPage() {
   goal.dataset.pid = String(p.id); goal.dataset.saved = p.goal;
   const attention = state.tasks.filter((t) => [...ATTENTION, ...PROBLEM].includes(t.status));
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
+  const chat = chatPanel({ compact: true });
   mount(
     PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [reportButton(), newTaskButton(), runPlanButton()] }),
     h('div', { class: 'grid stats' },
@@ -349,6 +350,7 @@ function overviewPage() {
       StatCard({ label: 'Проблеми', value: count(PROBLEM), tone: count(PROBLEM) ? 'danger' : undefined, hint: 'помилка / заблоковано' }),
       StatLink({ href: '#/costs', label: 'Витрати', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd <= 0 ? 'danger' : undefined,
         hint: state.costs?.budgetUsd != null ? `бюджет ${usd(state.costs.budgetUsd)}, лишилось ${usd(state.costs.remainingUsd)}` : 'бюджет не задано' })),
+    chat.panel,
     h('div', { class: 'grid cols-2' },
       PanelCard({ title: 'Ціль проєкту', subtitle: 'З неї AI-планер будує план задач' },
         goal, h('div', { class: 'row' },
@@ -365,6 +367,7 @@ function overviewPage() {
         state.agents ? h('div', { class: 'stack' }, ...agentList().map((a) => { const [l, tone] = agentState(a); return h('div', { class: 'row between' }, h('span', {}, a.name, a.version ? h('span', { class: 'muted' }, ` ${a.version}`) : null), Badge(l, tone)); }))
           : h('p', { class: 'muted' }, 'Перевірка агентів…'))),
   );
+  chat.after();
 }
 
 function costsPanel() {
@@ -1037,12 +1040,30 @@ const planBadge = (pl) => Badge(PLAN_STATUS[pl.status]?.[0] ?? pl.status, PLAN_S
 // ---------------------------------------------------------------- page: chat
 async function loadChat() { state.chat = { projectId: state.projectId, ...(await api('GET', `/api/projects/${state.projectId}/chat`)) }; }
 const chatWho = (m) => (m.provider === 'mock' ? 'mock (демо, не AI)' : [m.provider, m.model, m.effort].filter(Boolean).join(' · '));
-function chatPage() {
+const PLAN_STATE = { succeeded: ['пропозиція', 'accent'], applied: ['застосовано', 'success'], discarded: ['відхилено', 'neutral'], running: ['будується', 'info'], failed: ['помилка', 'danger'], canceled: ['скасовано', 'neutral'] };
+const CHAT_PROMPTS = ['Який стан етапів і що блокує проєкт?', 'Що робити далі?', 'Склади план задач для цілі проєкту'];
+/** Ukrainian plural: plural(n, 'задача', 'задачі', 'задач'). */
+const plural = (n, one, few, many) => { const t = n % 100, u = n % 10; return t >= 11 && t <= 14 ? many : u === 1 ? one : u >= 2 && u <= 4 ? few : many; };
+/** The plan a chat reply proposed: status, size and actions (create drafts / review in the planner / reject). */
+function chatPlanCard(m) {
+  const pl = m.plan;
+  const [label, tone] = PLAN_STATE[pl.status] ?? [pl.status, 'neutral'];
+  const done = async (msg) => { toast(msg, 'success'); await reloadProject(); await loadChat(); render(); };
+  return h('div', { class: 'chat-plan' },
+    h('div', { class: 'row wrap' }, icon('planner'), h('strong', {}, `План: ${pl.tasks} ${plural(pl.tasks, 'задача', 'задачі', 'задач')}`), Badge(label, tone)),
+    pl.summary ? h('div', { class: 'text-2' }, pl.summary) : null,
+    h('div', { class: 'row wrap' },
+      pl.status === 'succeeded' ? SecondaryButton({ size: 'sm', icon: 'check', onClick: act(async () => { await api('POST', `/api/plans/${pl.id}/apply`, {}); await done('Створено чернетки задач — перевірте й запустіть план'); }) }, `Створити ${pl.tasks} ${plural(pl.tasks, 'чернетку', 'чернетки', 'чернеток')}`) : null,
+      pl.status === 'applied' ? GhostButton({ size: 'sm', icon: 'tasks', onClick: () => go('#/tasks') }, 'До задач') : null,
+      GhostButton({ size: 'sm', icon: 'planner', onClick: () => go('#/planner') }, 'Детально в AI-планері'),
+      pl.status === 'succeeded' ? GhostButton({ size: 'sm', icon: 'close', onClick: act(async () => { await api('POST', `/api/plans/${pl.id}/discard`); await done('План відхилено'); }) }, 'Відхилити') : null));
+}
+/** Project chat: log + composer. compact = the panel on the project overview (latest messages, agent choice folded). */
+function chatPanel({ compact = false } = {}) {
   const p = state.project;
   if (state.chat?.projectId !== p.id) {
-    mount(PageHeader({ title: 'Чат з ШІ' }), PanelCard({}, EmptyState({ icon: 'chat', title: 'Завантаження розмови…' })));
     loadChat().then(render).catch((e) => toast(e.message, 'danger'));
-    return;
+    return { panel: PanelCard(compact ? { title: 'Чат з ШІ' } : {}, EmptyState({ icon: 'chat', title: 'Завантаження розмови…' })), after: () => {} };
   }
   const { messages, pending } = state.chat;
   const hadFocus = document.activeElement?.getAttribute('aria-label') === 'Повідомлення'; // keep typing across live re-renders
@@ -1051,39 +1072,47 @@ function chatPage() {
     { onchange: (e) => { state.chatProvider = e.target.value; } });
   const model = ModelInput(prov, state.chatModel || null);
   model.querySelector('input').addEventListener('input', (e) => { state.chatModel = e.target.value; });
-  const input = Textarea(state.chatDraft || '', { placeholder: 'Запитайте про код, план, задачі… (Ctrl+Enter — надіслати)', 'aria-label': 'Повідомлення',
+  const input = Textarea(state.chatDraft || '', { placeholder: 'Запитайте про етапи, задачі, код або попросіть скласти план… (Ctrl+Enter — надіслати)', 'aria-label': 'Повідомлення',
     oninput: (e) => { state.chatDraft = e.target.value; } });
-  const send = act(async () => {
-    const text = input.value.trim();
+  const sendText = act(async (text) => {
     if (!text || state.chat.pending) return;
     await api('POST', `/api/projects/${p.id}/chat`, { text, provider: prov.value, model: modelValue(model) });
     state.chatDraft = ''; state.chatStep = '';
     await loadChat(); render();
   });
+  const send = () => sendText(input.value.trim());
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
-  const clear = act(async () => {
-    if (!await confirmModal('Очистити всю розмову в цьому проєкті? Повідомлення буде видалено назавжди.', { title: 'Очистити чат', danger: true, ok: 'Очистити' })) return;
-    await api('DELETE', `/api/projects/${p.id}/chat`); await loadChat(); render();
-  });
-  const log = h('div', { class: 'chat-log', role: 'log', 'aria-live': 'polite', 'aria-label': 'Розмова' },
-    ...(messages.length ? messages.map((m) => ChatBubble({ mine: m.role === 'user', text: m.text, error: m.error,
+  const shown = compact ? messages.slice(-6) : messages;
+  const log = h('div', { class: compact ? 'chat-log compact' : 'chat-log', role: 'log', 'aria-live': 'polite', 'aria-label': 'Розмова' },
+    compact && messages.length > shown.length ? h('a', { href: '#/chat', class: 'muted', style: 'align-self:center;font-size:var(--fs-sm)' }, `Ще ${messages.length - shown.length} раніших повідомлень — відкрити весь чат`) : null,
+    ...(shown.length ? shown.map((m) => ChatBubble({ mine: m.role === 'user', text: m.text, error: m.error, extra: m.plan ? chatPlanCard(m) : null,
       meta: `${m.role === 'user' ? 'Ви' : chatWho(m) || 'асистент'} · ${projectDate(m.createdAt)}` }))
-      : [EmptyState({ icon: 'chat', title: 'Розмови ще немає', text: 'Спитайте, як влаштований код, що робити далі чи як розбити ціль на задачі. Асистент читає репозиторій, але нічого не змінює.' })]),
+      : [EmptyState({ icon: 'chat', title: 'Розмови ще немає', text: 'Спитайте про стан етапів, що блокує задачі, як влаштований код, або попросіть скласти план. Асистент читає репозиторій і стан проєкту, але сам нічого не змінює: план стає задачами лише після вашого підтвердження.' })]),
     pending ? h('div', { class: 'chat-pending' }, Badge('відповідає', 'accent', { live: true }), h('span', {}, chatWho(pending) || 'асистент'),
       h('span', { id: 'chat-step', class: 'muted mono' }, state.chatStep || '')) : null);
-  mount(
-    PageHeader({ title: 'Чат з ШІ', subtitle: 'Пряма розмова з агентом про цей проєкт. Асистент читає код у режимі лише читання й нічого не змінює — зміни робляться через задачі.',
-      actions: GhostButton({ icon: 'trash', disabled: Boolean(pending) || !messages.length, onClick: clear }, 'Очистити') }),
-    PanelCard({ flush: true }, log),
-    PanelCard({ class: 'chat-composer' },
-      input,
-      h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' }, Field('Агент', prov), Field('Модель', model)),
-      h('div', { class: 'row wrap' }, PrimaryButton({ icon: 'send', disabled: Boolean(pending), onClick: send }, 'Надіслати'),
-        pending ? DangerButton({ icon: 'stop', onClick: act(async () => { await api('POST', `/api/projects/${p.id}/chat/cancel`); }) }, 'Зупинити') : null,
-        h('span', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Кожна відповідь — окремий запуск агента: витрачає ліміти підписки або, для API-агентів, гроші.'))),
-  );
-  log.scrollTop = log.scrollHeight;
-  if (hadFocus) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  const agentFields = h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' }, Field('Агент', prov), Field('Модель', model));
+  const composer = h('div', { class: 'chat-composer' },
+    messages.length ? null : h('div', { class: 'row wrap' }, ...CHAT_PROMPTS.map((q) => SecondaryButton({ size: 'sm', onClick: () => sendText(q) }, q))),
+    input,
+    compact ? Disclosure(`Агент: ${prov.selectedOptions[0]?.textContent ?? 'auto'}`, agentFields) : agentFields,
+    h('div', { class: 'row wrap' }, PrimaryButton({ icon: 'send', disabled: Boolean(pending), onClick: send }, 'Надіслати'),
+      pending ? DangerButton({ icon: 'stop', onClick: act(async () => { await api('POST', `/api/projects/${p.id}/chat/cancel`); }) }, 'Зупинити') : null,
+      h('span', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Кожна відповідь — окремий запуск агента: витрачає ліміти підписки або, для API-агентів, гроші.')));
+  const clear = act(async () => {
+    if (!await confirmModal('Очистити всю розмову в цьому проєкті? Повідомлення буде видалено назавжди; плани в AI-планері лишаться.', { title: 'Очистити чат', danger: true, ok: 'Очистити' })) return;
+    await api('DELETE', `/api/projects/${p.id}/chat`); await loadChat(); render();
+  });
+  const clearBtn = GhostButton({ size: compact ? 'sm' : undefined, icon: 'trash', disabled: Boolean(pending) || !messages.length, onClick: clear }, 'Очистити');
+  const panel = PanelCard(compact ? { flush: true, class: 'chat-panel', title: 'Чат з ШІ', subtitle: 'Етапи, задачі, код і план — асистент бачить стан проєкту, але сам нічого не змінює',
+    actions: [GhostButton({ size: 'sm', onClick: () => go('#/chat') }, 'Весь чат'), clearBtn] } : { flush: true, class: 'chat-panel' }, log, composer);
+  const after = () => { log.scrollTop = log.scrollHeight; if (hadFocus) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } };
+  return { panel, after, clearBtn };
+}
+function chatPage() {
+  const c = chatPanel();
+  mount(PageHeader({ title: 'Чат з ШІ', subtitle: 'Розмова з агентом про цей проєкт: стан етапів і задач, код, наступні кроки, план. Асистент читає репозиторій у режимі лише читання; запропонований план стає чернетками задач лише після вашого підтвердження.',
+    actions: c.clearBtn ?? null }), c.panel);
+  c.after();
 }
 
 function plannerPage() {

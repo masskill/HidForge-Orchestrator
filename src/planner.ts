@@ -29,7 +29,12 @@ ${files.length ? files.map((f) => `- ${f}`).join(NL) : '- (empty repository)'}
 ## Existing tasks (do not duplicate them; a new task may depend on one by its numeric id)
 ${ex.length ? ex.map((t) => `- #${t.id} [${t.status}] ${t.title} (paths: ${t.allowedPaths.join(', ') || 'any'})`).join('\n') : '- (none)'}
 
-## Planning rules
+${planFormat(maxTasks)}`;
+}
+
+/** Planning rules and the JSON plan shape; shared by the planner and the project chat (src/chat.ts). */
+export function planFormat(maxTasks: number, output = 'Reply with ONLY one JSON object inside a ```json fenced block, exactly this shape:'): string {
+  return `## Planning rules
 - Split the goal into at most ${maxTasks} small tasks; each must be finishable by one coding agent in one session.
 - Maximize safe parallelism: tasks that may run at the same time MUST have disjoint allowedPaths.
 - Put shared contracts (API shapes, schemas, interfaces) into an early task that the others depend on.
@@ -42,7 +47,7 @@ ${ex.length ? ex.map((t) => `- #${t.id} [${t.status}] ${t.title} (paths: ${t.all
 - complexity: "low" (mechanical, one or two files, obvious solution), "medium" (a normal feature or fix), "high" (cross-module, subtle, or easy to get wrong). Be honest: the orchestrator picks the model from category and complexity, and a higher complexity costs more.
 
 ## Output
-Reply with ONLY one JSON object inside a \`\`\`json fenced block, exactly this shape:
+${output}
 \`\`\`json
 {
   "summary": "one short paragraph: the approach",

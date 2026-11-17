@@ -103,10 +103,10 @@ export const statusTone = (s) => STATUS[s]?.[1] ?? 'neutral';
 /** StatusBadge(status) — one vocabulary for task statuses across all pages. */
 export const StatusBadge = (s) => Badge(STATUS_LABEL[s] || s, statusTone(s), { live: s === 'running', title: s });
 export const Chip = (text, o = {}) => h('span', { class: cx('chip', o.off && 'off'), title: o.title }, text);
-/** ChatBubble({ mine, meta, text, error }) — one chat message; text is shown as plain text (pre-wrap), never as HTML. */
-export const ChatBubble = ({ mine, meta, text, error }) => h('div', { class: cx('chat-msg', mine ? 'me' : 'ai', error && 'err') },
+/** ChatBubble({ mine, meta, text, error, extra }) — one chat message; text is shown as plain text (pre-wrap), never as HTML; extra = a node under it (e.g. a plan card). */
+export const ChatBubble = ({ mine, meta, text, error, extra }) => h('div', { class: cx('chat-msg', mine ? 'me' : 'ai', error && 'err') },
   h('div', { class: 'chat-meta' }, meta), text ? h('div', { class: 'chat-text' }, text) : null,
-  error ? h('div', { class: 'chat-error' }, error) : null);
+  error ? h('div', { class: 'chat-error' }, error) : null, extra ?? null);
 /** Disclosure(summary, ...children) — secondary details folded away by default (<details>, keyboard-accessible). */
 export const Disclosure = (summary, ...children) => h('details', { class: 'disclosure' }, h('summary', {}, summary), h('div', { class: 'stack' }, ...children));
 export const PermissionChip = (name, value) => Chip(value === 'supported' ? name : `${name}: ${value}`, { off: value !== 'supported', title: value });

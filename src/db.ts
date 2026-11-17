@@ -112,6 +112,8 @@ const MIGRATIONS: string[] = [
     role text not null, text text not null, provider text, model text, effort text, usage text, error text, created_at text not null
   );
   create index chat_messages_project on chat_messages(project_id, id);`,
+  // v7: a chat reply can carry a plan proposal (validated like the planner's, stored in plans)
+  `alter table chat_messages add column plan_id integer references plans(id) on delete set null;`,
 ];
 
 export function openDb(file: string): DatabaseSync {

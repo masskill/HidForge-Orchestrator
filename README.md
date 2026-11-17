@@ -33,7 +33,7 @@ Everything runs on your own computer. HidForge uses the CLIs you have already in
 | Area | Features |
 |---|---|
 | **Planning** | LLM planner (read-only): goal → validated task DAG → drafts you review. Manual tasks with dependencies, roles, allowed paths and check commands |
-| **Chat** | Talk to an agent about the project: each reply is a read-only run in a temporary copy of the repo, so it can read the code but never changes it. History is kept per project |
+| **Chat** | Talk to an agent about the project right on its overview page: stages, task state and failures, code, next steps. Each reply is a read-only run in a temporary copy of the repo. Ask for a plan and it is validated like a planner plan; draft tasks are created only when you click |
 | **Execution** | Parallel agents in separate git worktrees; DAG scheduler with priorities, retries with backoff, timeouts and stall detection; one writer per workspace; recovery after restart |
 | **Quality** | Gates: allowed paths, conflict markers, check commands (each command needs your approval once). AI reviewer (QA + Security), either advisory or required. Repair loop with findings. Integrator task when a post-merge check fails |
 | **Control** | Live logs, diff, Approve & Merge / Reject with feedback, stop / retry, project budget and per-task cost limit |

@@ -54,7 +54,11 @@ async function main() {
   const planning = input.startsWith('# Planning request');
   const attempt = Number(/Attempt:\s*(\d+)/.exec(input)?.[1] ?? 1);
   if (input.startsWith('# Code review request')) return review(d, attempt);
-  if (input.startsWith('# Chat with the HidForge assistant')) return chat(d);
+  // Chat: the prompt also lists task descriptions (which may carry their own directives); obey only the last user message.
+  if (input.startsWith('# Chat with the HidForge assistant')) {
+    const u = /@mock\s+(\{.*\})/.exec([...input.matchAll(/^User: (.*)$/gm)].at(-1)?.[1] ?? '');
+    return chat(u ? JSON.parse(u[1]!) : {});
+  }
   out({ type: 'message', text: `mock agent started (${planning ? 'planner' : `attempt ${attempt}`}) in ${path.basename(process.cwd())}` });
   if (d.echoArgs) out({ type: 'message', text: JSON.stringify(process.argv.slice(2)) });
   if (d.grandchild) {
@@ -94,7 +98,12 @@ async function chat(d: Directive) {
   out({ type: 'tool', text: '[read_file] README.md' });
   if (d.mode === 'hang') { out({ type: 'message', text: 'hanging (no further output)' }); await new Promise(() => {}); }
   await sleep(d.sleepMs ?? 200);
-  out({ type: 'result', ok: true, text: `MOCK reply (not an AI): ${last}`, usage: { input_tokens: 0, output_tokens: 0 } });
+  let text = `MOCK reply (not an AI): ${last}`;
+  // Asked for a plan ("план" / "plan" in the message, or a plan directive): answer with prose + the planner's JSON block.
+  if (d.plan || d.planRaw || /план|plan/i.test(last.replace(/@mock \{.*\}/, ''))) {
+    text += NL + NL + (d.planRaw ?? FENCE + 'json' + NL + JSON.stringify(d.plan ?? defaultPlan(), null, 2) + NL + FENCE);
+  }
+  out({ type: 'result', ok: true, text, usage: { input_tokens: 0, output_tokens: 0 } });
   process.exit(0);
 }
 

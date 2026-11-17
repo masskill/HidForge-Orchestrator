@@ -335,7 +335,11 @@ dialog.modal::backdrop { background: var(--scrim); }
 .chat-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .chat-error { color: var(--danger); font-size: var(--fs-sm); margin-top: var(--s-1); overflow-wrap: anywhere; }
 .chat-pending { align-self: flex-start; color: var(--text-2); font-size: var(--fs-sm); display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.chat-composer { display: grid; gap: var(--s-3); padding: var(--s-4) var(--s-5) var(--s-5); border-top: 1px solid var(--border-soft); }
 .chat-composer textarea { min-height: 96px; }
+.chat-log.compact { max-height: 420px; }
+.chat-plan { display: grid; gap: var(--s-2); margin-top: var(--s-3); padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-panel); }
+.chat-plan .icon { color: var(--text-2); }
 
 /* ---------------------------------------------------------------- Appearance (theme picker) */
 .radio-seg label { flex: none; display: inline-flex; align-items: center; padding: 6px var(--s-3); min-height: 32px; border-radius: var(--r-sm); color: var(--text-muted); font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
