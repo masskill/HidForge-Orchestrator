@@ -3,7 +3,7 @@ import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
   PermissionChip, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
-  Kanban, DagGraph, EventCard, statusTone,
+  Kanban, DagGraph, EventCard, statusTone, Progress,
 } from './ui.js';
 
 const TOKEN = document.querySelector('meta[name="hidforge-token"]').content;
@@ -20,12 +20,13 @@ const ROLES = ['Project Manager/Planner', 'Architect', 'Frontend', 'Backend', 'Q
 const PAGES = [
   { id: 'projects', label: 'Проєкти', icon: 'projects' },
   { id: 'overview', label: 'Огляд', icon: 'overview' },
+  { id: 'plan', label: 'План проєкту', icon: 'stages' },
   { id: 'tasks', label: 'Задачі', icon: 'tasks' },
   { id: 'planner', label: 'AI-планер', icon: 'planner' },
   { id: 'agents', label: 'Агенти', icon: 'agents' },
   { id: 'activity', label: 'Журнал подій', icon: 'activity' },
   { id: 'costs', label: 'Витрати', icon: 'costs' },
-  { id: 'models', label: 'Аналітика моделей', icon: 'overview' },
+  { id: 'models', label: 'Аналітика моделей', icon: 'chart' },
   { id: 'reports', label: 'Звіти й рішення', icon: 'report' },
   { id: 'system', label: 'Система', icon: 'system' },
   { id: 'settings', label: 'Налаштування', icon: 'settings' },
@@ -150,7 +151,8 @@ async function reloadProject() {
     api('GET', `/api/events?projectId=${state.projectId}&type=task.status&before=9007199254740991&limit=14`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
   state.projectSummaries[project.id] = projectTaskCounts(tasks);
-  state.costs = await api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null);
+  [state.costs, state.planView] = await Promise.all([api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null),
+    api('GET', `/api/projects/${state.projectId}/plan-progress`).catch(() => null)]);
 }
 async function selectProject(id) {
   state.projectId = id; state.taskId = null; state.editing = null;
@@ -171,9 +173,9 @@ function route() {
 function render() {
   renderShell();
   const pg = $('#page');
-  const needsProject = ['overview', 'tasks', 'planner', 'activity', 'costs', 'reports'].includes(state.page);
+  const needsProject = ['overview', 'plan', 'tasks', 'planner', 'activity', 'costs', 'reports'].includes(state.page);
   if (needsProject && !state.project) { pg.replaceChildren(noProject()); return; }
-  ({ projects: projectsPage, overview: overviewPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage,
+  ({ projects: projectsPage, overview: overviewPage, plan: planPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage,
     activity: activityPage, costs: costsPage, models: modelsPage, reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
 }
 const noProject = () => PanelCard({}, EmptyState({ icon: 'folder', title: 'Проєкт не відкрито',
@@ -259,7 +261,7 @@ function renderProjectCards() {
       : h('span', { class: 'muted' }, 'Завантаження статистики задач…');
     return ItemCard({
       class: 'project-card', icon: 'projects', title: p.name,
-      status: state.projectId === p.id ? Badge('Активний', 'success') : null,
+      status: state.projectId === p.id ? Badge('Відкритий', 'accent') : null,
       body: h('div', { class: 'stack' },
         InfoList([
           ['Репозиторій', h('code', { class: 'wrap' }, p.repoPath || '—')],
@@ -275,10 +277,29 @@ function renderProjectCards() {
           go('#/overview');
         }) }, 'Відкрити'),
         SecondaryButton({ icon: 'edit', size: 'sm', onClick: act(() => editProjectGoal(p)) }, 'Змінити ціль'),
+        DangerButton({ icon: 'trash', size: 'sm', onClick: act(() => deleteProject(p)) }, 'Видалити'),
       ],
     });
   }) : [PanelCard({}, EmptyState({ icon: 'search', title: 'Проєктів не знайдено',
     text: 'Спробуйте іншу назву або шлях до репозиторію.' }))]));
+}
+
+async function deleteProject(p) {
+  const ok = await confirmModal(`Видалити проєкт «${p.name}» з HidForge? Буде видалено його задачі, історію запусків, плани й робочі копії задач (worktree). Ваш репозиторій і гілки задач у ньому не зміняться. Скасувати видалення неможливо.`,
+    { title: 'Видалити проєкт', danger: true, ok: 'Видалити проєкт' });
+  if (!ok) return;
+  const r = await api('DELETE', `/api/projects/${p.id}`);
+  toast(r.keptBranches.length ? `Проєкт видалено. Незлиті гілки задач лишились у репозиторії: ${r.keptBranches.join(', ')}` : 'Проєкт видалено', 'success');
+  delete state.projectSummaries[p.id];
+  await loadProjects();
+  if (state.projectId === p.id) {
+    const next = state.projects[0];
+    if (next) { await selectProject(next.id); return; }
+    state.es?.close();
+    Object.assign(state, { projectId: null, project: null, tasks: [], plans: [], activity: [], costs: null, planView: null, live: false });
+    ls.set('hf-project', '');
+  }
+  render();
 }
 
 function projectsPage() {
@@ -317,6 +338,8 @@ function overviewPage() {
   mount(
     PageHeader({ title: p.name, subtitle: 'Ціль → DAG задач → паралельні агенти в git worktree → перевірки → Approve & Merge', meta: projectMeta(p), actions: [reportButton(), newTaskButton(), runPlanButton()] }),
     h('div', { class: 'grid stats' },
+      StatLink({ href: '#/plan', label: 'Виконано (приблизно)', value: state.planView ? `${state.planView.pct}%` : '—', tone: 'accent',
+        hint: state.planView?.currentStage ? `етап ${state.planView.currentStage} з ${state.planView.stages.length}` : 'план порожній' }),
       StatCard({ label: 'Усього задач', value: state.tasks.length, hint: `${count(['draft'])} чернеток` }),
       StatCard({ label: 'Виконується', value: count(ACTIVE), tone: 'info', hint: `з них у роботі: ${count(['running'])}` }),
       StatCard({ label: 'Потребують уваги', value: count(ATTENTION), tone: 'warning', hint: 'рев\'ю та запитання' }),
@@ -606,6 +629,47 @@ function costsPage() {
       : sessions ? costsPanel() : PanelCard({}, EmptyState({ icon: 'costs', title: 'Сесій ще немає',
         text: 'Після запуску задач, планера або рецензій тут з’явиться статистика агентів.' })),
     budgetSettings(p),
+  );
+}
+
+// ---------------------------------------------------------------- page: project plan
+const AGENT_SOURCE = { running: ['працює зараз', 'accent'], next: ['наступна спроба', 'neutral'], last: ['остання спроба', 'neutral'] };
+const agentCell = (a) => (a ? h('div', { class: 'stack tight' }, h('span', { class: 'mono' }, [a.provider, a.model, a.effort].filter(Boolean).join(' · ')),
+  Badge(AGENT_SOURCE[a.source][0], AGENT_SOURCE[a.source][1], { plain: a.source !== 'running', live: a.source === 'running' })) : h('span', { class: 'muted' }, '—'));
+function planPage() {
+  const v = state.planView;
+  const header = PageHeader({ title: 'План проєкту', subtitle: 'Етапи за залежностями задач: що вже зроблено, хто, якою моделлю й з якими зусиллями працює зараз',
+    meta: projectMeta(state.project), actions: [SecondaryButton({ icon: 'refresh', onClick: act(async () => { await reloadProject(); render(); }) }, 'Оновити'), runPlanButton()] });
+  if (!v) { mount(header, PanelCard({}, EmptyState({ icon: 'alert', title: 'План недоступний', text: 'Не вдалося завантажити план. Перевірте сервер і натисніть «Оновити».' }))); return; }
+  if (!v.total) {
+    mount(header, PanelCard({}, EmptyState({ icon: 'stages', title: 'Плану ще немає', text: 'Задайте ціль проєкту і згенеруйте план AI-планером або додайте задачі вручну.',
+      action: PrimaryButton({ icon: 'planner', onClick: () => go('#/planner') }, 'Згенерувати план') })));
+    return;
+  }
+  const running = v.stages.flatMap((s) => s.tasks.filter((t) => t.status === 'running').map((t) => ({ ...t, stage: s.n })));
+  const stageBadge = (s) => (s.done === s.total ? Badge('завершено', 'success') : s.current ? Badge('поточний етап', 'accent') : Badge('очікує', 'neutral'));
+  mount(header,
+    h('div', { class: 'grid stats' },
+      h('div', { class: 'stat t-accent' }, h('span', { class: 'label' }, 'Виконано (приблизно)'), h('span', { class: 'value' }, `${v.pct}%`), Progress({ value: v.pct, label: 'Загальне виконання проєкту' })),
+      StatCard({ label: 'Поточний етап', value: v.currentStage ? `${v.currentStage} з ${v.stages.length}` : 'усі завершено', tone: v.currentStage ? undefined : 'success' }),
+      StatCard({ label: 'Агентів працює', value: v.running, tone: v.running ? 'accent' : undefined }),
+      StatCard({ label: 'Злито задач', value: `${v.done} з ${v.total}`, tone: v.done === v.total ? 'success' : undefined })),
+    PanelCard({ title: 'Зараз працюють', subtitle: 'Агент · модель · зусилля для кожної задачі, що виконується' },
+      running.length ? h('div', { class: 'stack' }, ...running.map((t) => h('div', { class: 'row between wrap-row' },
+        h('a', { href: `#/tasks/${t.id}`, class: 'wrap' }, h('span', { class: 'id' }, `#${t.id}`), ' ', t.title, h('span', { class: 'muted' }, ` · етап ${t.stage}`)),
+        h('span', { class: 'row' }, h('span', { class: 'mono' }, [t.agent?.provider, t.agent?.model, t.agent?.effort].filter(Boolean).join(' · ')), h('span', { class: 'muted' }, `спроба ${t.attempts}/${t.maxAttempts}`)))))
+        : EmptyState({ icon: 'agents', title: 'Зараз ніхто не працює', text: 'Задачі запускаються, коли їхні залежності злито і є вільний слот для агента.' })),
+    ...v.stages.map((s) => PanelCard({ flush: true, title: `Етап ${s.n}`, subtitle: `${s.done} з ${s.total} задач злито · приблизно ${s.pct}%`, actions: stageBadge(s) },
+      h('div', { class: 'progress-row' }, Progress({ value: s.pct, label: `Виконання етапу ${s.n}` })),
+      Table({ columns: [
+        { label: 'Задача', class: 'grow', render: (t) => h('a', { href: `#/tasks/${t.id}`, class: 'wrap' }, h('span', { class: 'id' }, `#${t.id}`), ' ', t.title) },
+        { label: 'Тип · складність', render: (t) => kindLabel(t) || '—' },
+        { label: 'Статус', render: (t) => StatusBadge(t.status) },
+        { label: 'Агент · модель · зусилля', render: (t) => agentCell(t.agent) },
+        { label: 'Виконано', class: 'num', render: (t) => `≈${t.pct}%` },
+      ], rows: s.tasks }))),
+    h('p', { class: 'text-2', style: 'margin:0' },
+      'Відсоток приблизний, не вимір: злито — 100%, прийнято — 90%, на перевірці або чекає відповіді — 75%, заблоковано — 50%, виконується — 40%, решта — 0%. Складна задача важить утричі більше за просту, середня — удвічі. Етап — задачі, які можуть іти паралельно: наступний етап чекає злиття залежностей. «Наступна спроба» — кого вибере автовибір, якщо задачу запустити зараз.'),
   );
 }
 

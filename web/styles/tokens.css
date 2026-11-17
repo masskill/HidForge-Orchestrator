@@ -1,79 +1,90 @@
 /* HidForge design tokens — the single source of colors, radii, spacing and type.
-   Dark (operator console) is the default; light is an optional variant. Components use only these variables. */
+   HidForge Orange (docs/DESIGN_SYSTEM.md): graphite surfaces, orange for action and focus, mint for success.
+   Dark is the default; light is an optional variant. Components use only these variables. */
 :root {
   /* surfaces */
-  --bg-app: #0B0F0D;
-  --bg-sidebar: #0D120F;
-  --bg-panel: #111713;
-  --bg-panel-alt: #151C17;
-  --bg-input: #0E1410;
-  --bg-hover: rgba(120, 200, 150, 0.06);
-  /* borders */
-  --border: rgba(120, 160, 130, 0.18);
-  --border-strong: rgba(120, 200, 150, 0.28);
-  /* text */
-  --text: #F2F5F2;
-  --text-2: #A8B3AB;
-  --text-muted: #7D867F;
-  /* accents */
-  --accent: #47E0A1;
-  --accent-hover: #3BD392;
-  --accent-soft: rgba(71, 224, 161, 0.14);
-  --on-accent: #06140D;
-  --success: #33D17A;
-  --warning: #F5C86A;
-  --danger: #FF6B6B;
-  --info: #7DD3FC;
-  --success-soft: rgba(51, 209, 122, 0.14);
-  --warning-soft: rgba(245, 200, 106, 0.14);
-  --danger-soft: rgba(255, 107, 107, 0.14);
-  --info-soft: rgba(125, 211, 252, 0.14);
-  /* radius */
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 18px;
-  --r-xl: 24px;
+  --bg-app: #0B100E;
+  --bg-sidebar: #0E1511;
+  --bg-panel: #141C17;
+  --bg-panel-alt: #1A241E;
+  --bg-input: #1A241E;
+  --bg-active: #29251D;                 /* calm warm tint of an active zone */
+  --bg-hover: rgba(175, 187, 178, 0.07);
+
+  --border: #304037;
+  --border-soft: #26342C;
+  --border-strong: #46594D;             /* hover / emphasised neutral border — never bright orange */
+
+  --text: #F5F7F5;
+  --text-2: #AFBBB2;
+  --text-muted: #86948A;
+
+  /* brand accent: primary action, selected item, active stage */
+  --accent: #FF6B3D;
+  --accent-hover: #FF815A;
+  --accent-pressed: #E9572C;
+  --accent-soft: #3B241C;
+  --on-accent: #15110E;
+
+  /* states: mint = done / online / passed; orange is never an error */
+  --success: #47E0A1;
+  --success-soft: #193B2D;
+  --warning: #F5C467;
+  --warning-soft: rgba(245, 196, 103, 0.14);
+  --danger: #FF6870;
+  --danger-soft: rgba(255, 104, 112, 0.14);
+  --info: #64B7FF;
+  --info-soft: rgba(100, 183, 255, 0.14);
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
   --r-pill: 999px;
-  /* spacing: 4 / 8 / 12 / 16 / 24 / 32 */
+
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
-  /* type */
+
   --font: Inter, Manrope, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
-  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 22px; --fs-2xl: 28px; --fs-stat: 30px;
-  --tracking-id: 0.08em;
-  /* effects: soft, used sparingly */
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 30px; --fs-stat: 30px;
+  --tracking-id: 0.06em;
+
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --focus: 0 0 0 3px rgba(71, 224, 161, 0.35);
-  --sidebar-w: 248px;
+  --focus-color: #FF9A7A;
+  --focus: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--focus-color);
+  --sidebar-w: 240px;
   color-scheme: dark;
 }
 
-/* Light variant: same identity (mint accent, rounded panels), light surfaces. */
+/* Light variant: same roles; the accent is darkened on purpose for contrast. */
 :root[data-theme="light"] {
-  --bg-app: #F3F6F4;
-  --bg-sidebar: #EAF0EC;
+  --bg-app: #F4F7F4;
+  --bg-sidebar: #EAF0EA;
   --bg-panel: #FFFFFF;
-  --bg-panel-alt: #F4F8F5;
+  --bg-panel-alt: #EDF2ED;
   --bg-input: #FFFFFF;
-  --bg-hover: rgba(20, 120, 80, 0.06);
-  --border: rgba(30, 80, 50, 0.14);
-  --border-strong: rgba(20, 120, 80, 0.30);
-  --text: #102017;
-  --text-2: #3E4F44;
-  --text-muted: #66756B;
-  --accent: #0E9F66;
-  --accent-hover: #0B8A58;
-  --accent-soft: rgba(14, 159, 102, 0.12);
+  --bg-active: #FFF0E9;
+  --bg-hover: rgba(20, 32, 24, 0.05);
+  --border: #CFDAD0;
+  --border-soft: #DEE7DF;
+  --border-strong: #A9B9AC;
+  --text: #142018;
+  --text-2: #4C6052;
+  --text-muted: #687B6C;
+  --accent: #B83D16;
+  --accent-hover: #9C3313;
+  --accent-pressed: #862A0F;
+  --accent-soft: #FFE9DE;
   --on-accent: #FFFFFF;
-  --success: #12884A;
-  --warning: #9A6700;
-  --danger: #C7372F;
-  --info: #0B6FA4;
-  --success-soft: rgba(18, 136, 74, 0.10);
-  --warning-soft: rgba(154, 103, 0, 0.10);
-  --danger-soft: rgba(199, 55, 47, 0.10);
-  --info-soft: rgba(11, 111, 164, 0.10);
-  --shadow: 0 8px 24px rgba(16, 32, 23, 0.12);
-  --focus: 0 0 0 3px rgba(14, 159, 102, 0.30);
+  --success: #137A50;
+  --success-soft: #DFF5EA;
+  --warning: #926000;
+  --warning-soft: rgba(146, 96, 0, 0.10);
+  --danger: #BD283D;
+  --danger-soft: rgba(189, 40, 61, 0.10);
+  --info: #1369AC;
+  --info-soft: rgba(19, 105, 172, 0.10);
+  --shadow: 0 8px 24px rgba(20, 32, 24, 0.12);
+  --focus-color: #B83D16;
   color-scheme: light;
 }

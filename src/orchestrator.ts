@@ -149,6 +149,28 @@ export class Orchestrator {
     return this.store.createProject({ name: path.basename(root), repoPath: root, baseBranch: branch, goal });
   }
 
+  /**
+   * Forget a project: HidForge's records and its task worktrees are removed. The user's repository and the task
+   * branches in it are left as they are, so unmerged work is never lost. Refused while anything of the project runs.
+   */
+  async deleteProject(id: number): Promise<{ ok: true; removedWorktrees: number; keptBranches: string[] }> {
+    const p = this.store.getProject(id);
+    const tasks = this.store.listTasks(id);
+    const busy = tasks.filter((t) => ['queued', 'running'].includes(t.status) || this.reviewer.isRunning(t.id));
+    if (busy.length) throw new Conflict(`stop the running or queued tasks first: ${busy.map((t) => `#${t.id}`).join(', ')}`);
+    if (this.store.runningPlans().some((x) => x.projectId === id)) throw new Conflict('the AI planner is running for this project; stop it first');
+    let removed = 0;
+    for (const t of tasks) {
+      if (!t.workspace) continue;
+      await this.ws.remove(p.repoPath, t.workspace, null).catch(() => {});
+      removed++;
+    }
+    const keptBranches = tasks.filter((t) => t.branch && t.status !== 'merged').map((t) => t.branch!);
+    this.store.deleteProject(id);
+    this.store.event({ type: 'project.deleted', data: { name: p.name, removedWorktrees: removed, keptBranches } });
+    return { ok: true, removedWorktrees: removed, keptBranches };
+  }
+
   createTask(projectId: number, input: Partial<Task> & { title: string }): Task {
     const clean = this.cleanTaskInput(input);
     const deps = clean.dependsOn ?? [];

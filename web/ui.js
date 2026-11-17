@@ -46,6 +46,8 @@ const ICONS = {
   costs: 'M3 7h18v13H3zM3 7V5a2 2 0 0 1 2-2h13M16 12h5v5h-5a2.5 2.5 0 0 1 0-5z',
   system: 'M4 5h16v6H4zM4 14h16v6H4zM7 8h.01M7 17h.01M11 8h6M11 17h6',
   terminal: 'M4 5h16v14H4zM8 10l3 2-3 2M13 15h4',
+  stages: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5',
+  chart: 'M4 20V11M10 20V5M16 20v-6M2 20h20',
 };
 export function icon(name, cls = '') {
   const NS = 'http://www.w3.org/2000/svg';
@@ -58,15 +60,15 @@ export function icon(name, cls = '') {
   svg.append(p);
   return svg;
 }
-/** Product mark: original "DAG node" glyph on a mint tile. */
+/** Product mark: original "DAG node" glyph — orange flow into a mint (done) node, on a graphite tile. */
 export function logo() {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 34 34'); svg.setAttribute('class', 'logo'); svg.setAttribute('aria-hidden', 'true');
   const add = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); svg.append(e); };
-  add('rect', { x: 1, y: 1, width: 32, height: 32, rx: 10, fill: 'var(--accent-soft)', stroke: 'var(--border-strong)' });
+  add('rect', { x: 1, y: 1, width: 32, height: 32, rx: 10, fill: 'var(--bg-panel-alt)', stroke: 'var(--border)' });
   add('path', { d: 'M11 11L23 17M11 23L23 17M11 11v12', stroke: 'var(--accent)', 'stroke-width': 2, fill: 'none', 'stroke-linecap': 'round' });
-  for (const [x, y] of [[11, 11], [11, 23], [23, 17]]) add('circle', { cx: x, cy: y, r: 3.2, fill: 'var(--accent)' });
+  for (const [x, y, c] of [[11, 11, 'accent'], [11, 23, 'accent'], [23, 17, 'success']]) add('circle', { cx: x, cy: y, r: 3.2, fill: `var(--${c})` });
   return svg;
 }
 
@@ -90,7 +92,7 @@ export function IconButton(o) {
 /** tone: success | accent | warning | danger | info | neutral */
 export const Badge = (text, tone = 'neutral', o = {}) => h('span', { class: cx('badge', `tone-${tone}`, o.live && 'live', o.plain && 'plain'), title: o.title }, text);
 const STATUS = {
-  draft: ['чернетка', 'neutral'], ready: ['чекає залежностей', 'neutral'], queued: ['у черзі', 'info'], running: ['виконується', 'info'],
+  draft: ['чернетка', 'neutral'], ready: ['чекає залежностей', 'neutral'], queued: ['у черзі', 'neutral'], running: ['виконується', 'accent'],
   review: ['рев\'ю', 'warning'], accepted: ['прийнято', 'success'], merged: ['злито', 'success'], blocked: ['заблоковано', 'danger'],
   failed: ['помилка', 'danger'], canceled: ['скасовано', 'neutral'], needs_user_input: ['потрібна відповідь', 'warning'],
 };
@@ -126,6 +128,12 @@ export const StatCard = ({ label, value, hint, tone }) => h('div', { class: cx('
 export const StatLink = ({ href, label, value, hint, tone }) => h('a',
   { class: 'stat-link', href, 'aria-label': `${label}: ${value}. Переглянути деталі` },
   StatCard({ label, value, hint, tone }));
+/** Progress({ value 0..100, label, tone: accent|success }) — approximate progress bar with an accessible name and a text value. */
+export const Progress = ({ value, label, tone = 'accent' }) => {
+  const v = Math.max(0, Math.min(100, Math.round(value || 0)));
+  return h('div', { class: cx('progress', `t-${v >= 100 ? 'success' : tone}`), role: 'progressbar', 'aria-label': label, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': v, 'aria-valuetext': `приблизно ${v}%` },
+    h('span', { class: 'fill', style: `width:${v}%` }));
+};
 /** InfoList([[label, value], ...]) — InfoRow pairs rendered as a <dl>. */
 export const InfoList = (rows) => h('dl', { class: 'info' }, ...rows.filter(Boolean).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v ?? '—')]));
 /** ItemCard({ icon, title, subtitle, status, off, body, footer }) — entity card (agent, device, item). */

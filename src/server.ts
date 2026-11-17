@@ -13,6 +13,7 @@ import { DEFAULT_ROLE_TEMPLATES, ROLES, normalizeRoleTemplates } from './contrac
 import { projectCosts, projectRuns, modelStats } from './costs.ts';
 import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_MATRIX, FABLE, FABLE_CATEGORIES, normalizeMatrix } from './routing.ts';
 import { projectReport, adrMarkdown, decisions } from './report.ts';
+import { projectPlan } from './progress.ts';
 import { diagnostics, listBackups, createBackup } from './maintenance.ts';
 import { normalizeWsl } from './adapters/wsl.ts';
 import { normalizeSsh } from './adapters/ssh.ts';
@@ -105,6 +106,8 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
       reviewPolicy: b.reviewPolicy === undefined ? undefined : normalizeReviewPolicy(b.reviewPolicy, (p) => Boolean(orch.registry.get(p))),
       budgetUsd: b.budgetUsd === undefined ? undefined : budget(b.budgetUsd),
     })],
+    ['DELETE', /^\/api\/projects\/(\d+)$/, (m) => orch.deleteProject(id(m))],
+    ['GET', /^\/api\/projects\/(\d+)\/plan-progress$/, (m) => projectPlan(orch, id(m))],
     ['GET', /^\/api\/projects\/(\d+)\/costs$/, (m) => projectCosts(s, id(m))],
     ['GET', /^\/api\/projects\/(\d+)\/runs$/, (m, _b, u) => { s.getProject(id(m)); return projectRuns(s, id(m), {
       before: num(u, 'before'), limit: num(u, 'limit'), status: u.searchParams.get('status') ?? undefined, provider: u.searchParams.get('provider') ?? undefined }); }],

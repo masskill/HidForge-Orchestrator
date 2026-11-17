@@ -169,6 +169,15 @@ export class Store {
     return this.getProject(id);
   }
 
+  /** Remove a project and everything HidForge stored about it (tasks, runs, plans cascade; events by id). */
+  deleteProject(id: number): void {
+    this.getProject(id);
+    this.tx(() => {
+      this.db.prepare('delete from events where project_id = ? or task_id in (select id from tasks where project_id = ?)').run(id, id);
+      this.db.prepare('delete from projects where id = ?').run(id);
+    });
+  }
+
   // ---- tasks
   createTask(projectId: number, t: Partial<Task> & { title: string }): Task {
     this.getProject(projectId);
