@@ -108,13 +108,13 @@ export function spawnSafe(cmd: string, args: string[], opts: { cwd: string; env?
 }
 
 /** Run to completion, capture output. Used for git and short probes. */
-export function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: number; input?: string } = {}):
+export function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: number; input?: string; env?: Record<string, string> } = {}):
   Promise<{ code: number; stdout: string; stderr: string }> {
   const r = resolveCommand(cmd);
   if (!r) return Promise.resolve({ code: 127, stdout: '', stderr: `not found: ${cmd}` });
   return new Promise((resolve) => {
     const child = execFile(r.file, [...r.prefixArgs, ...args], {
-      cwd: opts.cwd, env: childEnv(), shell: false, windowsHide: true,
+      cwd: opts.cwd, env: childEnv(opts.env), shell: false, windowsHide: true,
       timeout: opts.timeoutMs ?? 60_000, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8',
     }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as NodeJS.ErrnoException).code === 'number' ? Number((err as NodeJS.ErrnoException).code) : (err as { killed?: boolean }).killed ? 124 : 1) : 0;

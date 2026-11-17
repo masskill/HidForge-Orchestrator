@@ -1,5 +1,7 @@
 // Owner automation: auto-merge after an approving AI review, owner questions, auto-fix of stuck tasks, pause / stop.
 import { test } from 'node:test';
+import path from 'node:path';
+import { existsSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { setup, mock, waitFor, waitStatus } from './helpers.ts';
 import { normalizeReviewPolicy } from '../src/reviewer.ts';
@@ -93,5 +95,29 @@ test('pause / stop: a paused project starts nothing; stop interrupts without cou
     assert.equal(orch.store.getTask(p2.id).attempts, 0);
     orch.submit(p2.id);
     assert.equal((await waitStatus(orch, p2.id, ['review'])).attempts, 1);
+  } finally { await orch.stop(); }
+});
+
+test('project .env reaches verification commands only when switched on; never the worktree; values are masked in the log', async () => {
+  const { orch, project, repo } = await setup();
+  try {
+    writeFileSync(path.join(repo, '.env'), 'DB_URL=postgres://owner:s3cretpass@localhost/db\n# comment\n');
+    const cmd = 'node -e "console.log(\'url=\' + process.env.DB_URL), process.exit(process.env.DB_URL ? 0 : 4)"';
+    orch.store.updateProject(project.id, { allowedCommands: [cmd] });
+    const off = orch.createTask(project.id, { title: 'off', maxAttempts: 1, allowedPaths: ['e/**'], verifyCommands: [cmd], description: mock({ write: { 'e/1.txt': '1' } }) });
+    orch.submit(off.id);
+    const o = await waitStatus(orch, off.id, ['blocked']);
+    assert.ok(o.evidence.some((e) => e.kind === 'verify' && e.summary.endsWith('exit 4')), 'off by default: the check runs but does not see the variable');
+
+    orch.setVerifyEnv(project.id, true);
+    const on = orch.createTask(project.id, { title: 'on', maxAttempts: 1, allowedPaths: ['e2/**'], verifyCommands: [cmd], description: mock({ write: { 'e2/1.txt': '1' } }) });
+    orch.submit(on.id);
+    const t = await waitStatus(orch, on.id, ['review', 'blocked']);
+    assert.equal(t.status, 'review', JSON.stringify(t.evidence.map((e) => [e.kind, e.summary, (e.detail ?? '').slice(0, 300)])));
+    const ev = t.evidence.find((e) => e.kind === 'verify')!;
+    assert.ok(ev.ok);
+    assert.doesNotMatch(ev.detail ?? '', /s3cretpass/, 'the value is masked in the evidence');
+    assert.match(ev.detail ?? '', /url=\*\*\*/);
+    assert.ok(!existsSync(path.join(t.workspace!, '.env')), 'the .env is not copied into the worktree');
   } finally { await orch.stop(); }
 });

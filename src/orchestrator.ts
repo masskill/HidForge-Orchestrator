@@ -1,6 +1,7 @@
 // Orchestrator: DAG scheduler, run supervision, review gates, integration, restart recovery.
 // One instance owns one database: it is the only scheduler.
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { ChildProcess } from 'node:child_process';
@@ -446,7 +447,7 @@ export class Orchestrator {
     const failed: { cmd: string; out: string }[] = [];
     for (const cmd of t.verifyCommands) {
       if (commandDecision(cmd, p.allowedCommands).decision !== 'allow') continue;
-      const r = await this.runVerify(cmd, p.repoPath);
+      const r = await this.runVerify(cmd, p.repoPath, this.verifyEnv(p));
       this.store.addEvidence(t.id, { kind: 'integration-check', ok: r.code === 0, summary: `[${p.baseBranch}] ${cmd} -> exit ${r.code}`, detail: r.out });
       if (r.code !== 0) { failed.push({ cmd, out: r.out }); this.store.event({ projectId: p.id, taskId: t.id, type: 'integration.failed', data: { cmd } }); }
     }
@@ -754,7 +755,7 @@ export class Orchestrator {
           }, 'verification command needs approval');
           return;
         }
-        const r = await this.runVerify(cmd, t.workspace);
+        const r = await this.runVerify(cmd, t.workspace, this.verifyEnv(p));
         this.store.addEvidence(id, { kind: 'verify', ok: r.code === 0, summary: `${cmd} -> exit ${r.code}`, detail: r.out });
         if (r.code !== 0) return fail(`verification failed: ${cmd} (exit ${r.code})`);
       }
@@ -768,10 +769,26 @@ export class Orchestrator {
     }
   }
 
-  private async runVerify(cmd: string, cwd: string): Promise<{ code: number; out: string }> {
+  private async runVerify(cmd: string, cwd: string, env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
     const argv = parseArgv(cmd);
-    const r = await runCmd(argv[0]!, argv.slice(1), { cwd, timeoutMs: this.opts.verifyTimeoutSec * 1000 });
-    return { code: r.code, out: maskSecrets(`${r.stdout}\n${r.stderr}`).slice(-20_000) };
+    const r = await runCmd(argv[0]!, argv.slice(1), { cwd, env, timeoutMs: this.opts.verifyTimeoutSec * 1000 });
+    let out = maskSecrets(`${r.stdout}\n${r.stderr}`);
+    for (const v of Object.values(env)) if (v.length >= 6) out = out.split(v).join('***'); // the .env values never reach the log
+    return { code: r.code, out: out.slice(-20_000) };
+  }
+
+  /** Projects whose verification commands get the variables of the project's own .env (database URL etc.). */
+  verifyEnvProjects(): number[] { return this.store.getSetting<number[]>('verifyEnvProjects', []); }
+  setVerifyEnv(projectId: number, on: boolean): void {
+    this.store.getProject(projectId);
+    const rest = this.verifyEnvProjects().filter((x) => x !== projectId);
+    this.store.setSetting('verifyEnvProjects', on ? [...rest, projectId] : rest);
+  }
+  /** The project's .env, read at the moment a check runs and handed only to that check's process: never copied into the
+   *  worktree, never passed to an agent, masked in the check's output. {} when off or when there is no .env. */
+  private verifyEnv(p: Project): Record<string, string> {
+    if (!this.verifyEnvProjects().includes(p.id)) return {};
+    try { return parseEnv(readFileSync(path.join(p.repoPath, '.env'), 'utf8')) as Record<string, string>; } catch { return {}; }
   }
 
   // ------------------------------------------------------------------ restart recovery

@@ -1358,7 +1358,10 @@ function settingsPage() {
     rolesSettings(),
     p ? PanelCard({ title: 'Дозволені команди перевірки', subtitle: `Проєкт «${p.name}»` },
       h('p', { class: 'text-2', style: 'margin:0' }, 'Команди запускаються без shell у worktree задачі. Команди не з цього списку потребують підтвердження; git push, rm, curl, powershell тощо заборонені завжди.'),
-      cmds, h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
+      cmds,
+      Toggle({ label: 'Передавати перевіркам змінні з .env проєкту (адреса бази тощо). Файл не копіюється в робочу копію задачі, агент його не бачить, значення приховуються в журналі.', checked: p.verifyEnv === true,
+        onChange: act(async (v) => { await api('PATCH', `/api/projects/${p.id}`, { verifyEnv: v }); await reloadProject(); toast(v ? 'Перевірки отримують змінні з .env' : 'Змінні з .env перевіркам не передаються', 'success'); render(); }) }),
+      h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
         await api('PATCH', `/api/projects/${p.id}`, { allowedCommands: cmds.value.split('\n').map((x) => x.trim()).filter(Boolean) });
         await reloadProject(); toast('Збережено', 'success'); render();
       }) }, 'Зберегти'))) : null,

@@ -104,8 +104,8 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     ['POST', /^\/api\/projects\/(\d+)\/resume$/, (m) => orch.resumeProject(id(m))],
     ['POST', /^\/api\/projects$/, (_m, b) => orch.addProject(str(b.repoPath, 'repoPath'), String(b.goal ?? ''))],
     ['POST', /^\/api\/demo$/, () => createDemo(orch)],
-    ['GET', /^\/api\/projects\/(\d+)$/, (m) => ({ project: { ...s.getProject(id(m)), paused: orch.isPaused(id(m)) }, tasks: s.listTasks(id(m)) })],
-    ['PATCH', /^\/api\/projects\/(\d+)$/, (m, b) => { const p = s.updateProject(id(m), {
+    ['GET', /^\/api\/projects\/(\d+)$/, (m) => ({ project: { ...s.getProject(id(m)), paused: orch.isPaused(id(m)), verifyEnv: orch.verifyEnvProjects().includes(id(m)) }, tasks: s.listTasks(id(m)) })],
+    ['PATCH', /^\/api\/projects\/(\d+)$/, (m, b) => { if (typeof b.verifyEnv === 'boolean') orch.setVerifyEnv(id(m), b.verifyEnv); const p = s.updateProject(id(m), {
       goal: b.goal as string | undefined,
       allowedCommands: Array.isArray(b.allowedCommands) ? b.allowedCommands.map(String) : undefined,
       reviewPolicy: b.reviewPolicy === undefined ? undefined : normalizeReviewPolicy(b.reviewPolicy, (p) => Boolean(orch.registry.get(p))),
