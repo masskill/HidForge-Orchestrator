@@ -1,5 +1,6 @@
 ' HidForge Orchestrator: start without a terminal window and open the UI in the default browser.
 ' A second start only opens the browser: the server detects an already running instance.
+' Settings (data folder, port, optional API keys) come from .env next to HidForge, like `npm run dev`.
 ' Server output goes to %LOCALAPPDATA%\HidForge\hidforge.log. Stop it from the UI: Settings -> Stop server.
 Option Explicit
 Dim fso, sh, root, logDir
@@ -23,4 +24,4 @@ If fso.FileExists(logDir & "\hidforge.log") Then
 End If
 On Error GoTo 0
 sh.CurrentDirectory = root
-sh.Run "cmd /c node src\main.ts --open >> """ & logDir & "\hidforge.log"" 2>&1", 0, False
+sh.Run "cmd /c node --env-file-if-exists=.env src\main.ts --open >> """ & logDir & "\hidforge.log"" 2>&1", 0, False
