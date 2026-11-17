@@ -54,6 +54,7 @@ async function main() {
   const planning = input.startsWith('# Planning request');
   const attempt = Number(/Attempt:\s*(\d+)/.exec(input)?.[1] ?? 1);
   if (input.startsWith('# Code review request')) return review(d, attempt);
+  if (input.startsWith('# Chat with the HidForge assistant')) return chat(d);
   out({ type: 'message', text: `mock agent started (${planning ? 'planner' : `attempt ${attempt}`}) in ${path.basename(process.cwd())}` });
   if (d.echoArgs) out({ type: 'message', text: JSON.stringify(process.argv.slice(2)) });
   if (d.grandchild) {
@@ -86,6 +87,15 @@ async function main() {
   if ((d.failAttempts ?? 0) >= attempt) { out({ type: 'result', ok: false, text: 'simulated failure' }); process.exit(1); }
   if (d.mode !== 'noresult') out({ type: 'result', ok: true, text: 'done', usage: { input_tokens: 0, output_tokens: 0, ...(d.costUsd ? { total_cost_usd: d.costUsd } : {}) } });
   process.exit(d.exit ?? 0);
+}
+
+async function chat(d: Directive) {
+  const last = [...input.matchAll(/^User: (.*)$/gm)].at(-1)?.[1] ?? '';
+  out({ type: 'tool', text: '[read_file] README.md' });
+  if (d.mode === 'hang') { out({ type: 'message', text: 'hanging (no further output)' }); await new Promise(() => {}); }
+  await sleep(d.sleepMs ?? 200);
+  out({ type: 'result', ok: true, text: `MOCK reply (not an AI): ${last}`, usage: { input_tokens: 0, output_tokens: 0 } });
+  process.exit(0);
 }
 
 async function review(d: Directive, attempt: number) {

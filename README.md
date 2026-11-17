@@ -33,10 +33,11 @@ Everything runs on your own computer. HidForge uses the CLIs you have already in
 | Area | Features |
 |---|---|
 | **Planning** | LLM planner (read-only): goal → validated task DAG → drafts you review. Manual tasks with dependencies, roles, allowed paths and check commands |
+| **Chat** | Talk to an agent about the project: each reply is a read-only run in a temporary copy of the repo, so it can read the code but never changes it. History is kept per project |
 | **Execution** | Parallel agents in separate git worktrees; DAG scheduler with priorities, retries with backoff, timeouts and stall detection; one writer per workspace; recovery after restart |
 | **Quality** | Gates: allowed paths, conflict markers, check commands (each command needs your approval once). AI reviewer (QA + Security), either advisory or required. Repair loop with findings. Integrator task when a post-merge check fails |
 | **Control** | Live logs, diff, Approve & Merge / Reject with feedback, stop / retry, project budget and per-task cost limit |
-| **Visibility** | Pages: Projects, Overview, Tasks (table / kanban / graph), Planner, Agents, Event log, Costs, Reports and decisions (ADR), System, Settings |
+| **Visibility** | Pages: Projects, Overview, Tasks (table / kanban / graph), Planner, Chat, Agents, Event log, Costs, Reports and decisions (ADR), System, Settings |
 | **Product** | Installer (no admin rights), launch without a terminal, fast-forward updates, diagnostics, automatic daily backups |
 | **Optional** | WSL2 and VPS-over-SSH backends (experimental, off by default) |
 
@@ -180,6 +181,7 @@ src/            core (TypeScript, run directly by Node 24)
   orchestrator.ts  scheduler, runs, gates, merge, recovery
   planner.ts       LLM planner: goal → validated DAG → draft tasks
   reviewer.ts      AI reviewer (QA + Security)
+  chat.ts          project chat with a read-only assistant
   oneshot.ts       shared one-shot read-only agent session
   report.ts        project report and ADR decision log
   maintenance.ts   diagnostics and backups

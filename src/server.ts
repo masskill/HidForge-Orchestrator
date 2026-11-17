@@ -138,6 +138,10 @@ export function createServer(orch: Orchestrator, o: ServerOptions) {
     })],
     ['GET', /^\/api\/plans\/(\d+)$/, (m) => s.getPlan(id(m))],
     ['POST', /^\/api\/plans\/(\d+)\/cancel$/, (m) => orch.planner.cancel(id(m))],
+    ['GET', /^\/api\/projects\/(\d+)\/chat$/, (m) => orch.chat.state(id(m))],
+    ['POST', /^\/api\/projects\/(\d+)\/chat$/, (m, b) => orch.chat.send(id(m), b)],
+    ['POST', /^\/api\/projects\/(\d+)\/chat\/cancel$/, (m) => orch.chat.cancel(id(m))],
+    ['DELETE', /^\/api\/projects\/(\d+)\/chat$/, (m) => orch.chat.clear(id(m))],
     ['POST', /^\/api\/plans\/(\d+)\/discard$/, (m) => orch.planner.discard(id(m))],
     ['POST', /^\/api\/plans\/(\d+)\/apply$/, (m, b) => orch.planner.apply(id(m), {
       provider: b.provider ? String(b.provider) : undefined, model: b.model ? String(b.model) : null,

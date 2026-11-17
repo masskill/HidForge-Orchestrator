@@ -74,6 +74,12 @@ export interface PlanRun {
   usage: unknown; appliedTaskIds: number[] | null; createdAt: string; finishedAt: string | null;
 }
 
+/** One message of the project chat. Assistant messages record which agent answered; `error` is set when it failed. */
+export interface ChatMessage {
+  id: number; projectId: number; role: 'user' | 'assistant'; text: string;
+  provider: string | null; model: string | null; effort: string | null; usage: unknown; error: string | null; createdAt: string;
+}
+
 export interface HfEvent { id: number; projectId: number | null; taskId: number | null; runId: number | null; type: string; data: unknown; ts: string }
 
 type Row = Record<string, unknown>;
@@ -123,6 +129,11 @@ function toPlan(r: Row): PlanRun {
     output: (r.output as string) ?? null, plan: pj(r.plan, null), error: (r.error as string) ?? null, usage: pj(r.usage, null),
     appliedTaskIds: pj(r.applied_task_ids, null), createdAt: String(r.created_at), finishedAt: (r.finished_at as string) ?? null,
   };
+}
+
+function toChat(r: Row): ChatMessage {
+  return { id: Number(r.id), projectId: Number(r.project_id), role: r.role as ChatMessage['role'], text: String(r.text), provider: (r.provider as string) ?? null,
+    model: (r.model as string) ?? null, effort: (r.effort as string) ?? null, usage: pj(r.usage, null), error: (r.error as string) ?? null, createdAt: String(r.created_at) };
 }
 
 const TASK_COLUMNS: Record<string, string> = {
@@ -306,6 +317,18 @@ export class Store {
   locks(): { workspace: string; runId: number }[] {
     return this.db.prepare('select * from workspace_locks').all().map((r) => ({ workspace: String(r.workspace), runId: Number(r.run_id) }));
   }
+
+  // ---- chat
+  addChatMessage(m: Omit<ChatMessage, 'id' | 'createdAt'>): ChatMessage {
+    this.getProject(m.projectId);
+    const r = this.db.prepare('insert into chat_messages (project_id, role, text, provider, model, effort, usage, error, created_at) values (?,?,?,?,?,?,?,?,?) returning *')
+      .get(m.projectId, m.role, m.text, m.provider, m.model, m.effort, m.usage == null ? null : j(m.usage), m.error, now()) as Row;
+    return toChat(r);
+  }
+  listChat(projectId: number, limit = 200): ChatMessage[] {
+    return this.db.prepare('select * from (select * from chat_messages where project_id = ? order by id desc limit ?) order by id').all(projectId, limit).map((r) => toChat(r as Row));
+  }
+  clearChat(projectId: number): void { this.db.prepare('delete from chat_messages where project_id = ?').run(projectId); }
 
   // ---- planner runs
   createPlan(p: { projectId: number; provider: string; model: string | null; goal: string }): PlanRun {

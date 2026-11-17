@@ -31,6 +31,7 @@ const ICONS = {
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   play: 'M8 5l11 7-11 7z',
   stop: 'M7 7h10v10H7z',
+  send: 'M4 12l16-8-6 16-3-7z',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   check: 'M5 12l5 5 9-10',
   alert: 'M12 4l9 16H3zM12 10v4M12 17h.01',
@@ -47,6 +48,7 @@ const ICONS = {
   system: 'M4 5h16v6H4zM4 14h16v6H4zM7 8h.01M7 17h.01M11 8h6M11 17h6',
   terminal: 'M4 5h16v14H4zM8 10l3 2-3 2M13 15h4',
   stages: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5',
+  chat: 'M4 5h16v11H9l-5 4zM8 9h8M8 12h5',
   chart: 'M4 20V11M10 20V5M16 20v-6M2 20h20',
 };
 export function icon(name, cls = '') {
@@ -101,6 +103,10 @@ export const statusTone = (s) => STATUS[s]?.[1] ?? 'neutral';
 /** StatusBadge(status) — one vocabulary for task statuses across all pages. */
 export const StatusBadge = (s) => Badge(STATUS_LABEL[s] || s, statusTone(s), { live: s === 'running', title: s });
 export const Chip = (text, o = {}) => h('span', { class: cx('chip', o.off && 'off'), title: o.title }, text);
+/** ChatBubble({ mine, meta, text, error }) — one chat message; text is shown as plain text (pre-wrap), never as HTML. */
+export const ChatBubble = ({ mine, meta, text, error }) => h('div', { class: cx('chat-msg', mine ? 'me' : 'ai', error && 'err') },
+  h('div', { class: 'chat-meta' }, meta), text ? h('div', { class: 'chat-text' }, text) : null,
+  error ? h('div', { class: 'chat-error' }, error) : null);
 /** Disclosure(summary, ...children) — secondary details folded away by default (<details>, keyboard-accessible). */
 export const Disclosure = (summary, ...children) => h('details', { class: 'disclosure' }, h('summary', {}, summary), h('div', { class: 'stack' }, ...children));
 export const PermissionChip = (name, value) => Chip(value === 'supported' ? name : `${name}: ${value}`, { off: value !== 'supported', title: value });

@@ -17,6 +17,7 @@ import { spawnSafe, killTree, isAlive, parseArgv, run as runCmd, maskSecrets } f
 import { buildPrompt, cleanModel, commandDecision, roleTemplate, type RoleTemplates } from './contract.ts';
 import { Planner } from './planner.ts';
 import { Reviewer } from './reviewer.ts';
+import { Chat } from './chat.ts';
 import { projectCosts, cellStats } from './costs.ts';
 import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_CEILING, DEFAULT_MATRIX, resolveChain, reorderByStats, effortFlagFor, type Effort, type Link, type Matrix } from './routing.ts';
 
@@ -43,6 +44,7 @@ export class Orchestrator {
   readonly ws: WorkspaceManager;
   readonly planner: Planner;
   readonly reviewer: Reviewer;
+  readonly chat: Chat;
   readonly pluginErrors: PluginLoad['errors'];
   readonly opts: Required<Omit<OrchestratorOptions, 'adapters'>>;
   private readonly handles = new Map<number, Handle>();
@@ -69,6 +71,7 @@ export class Orchestrator {
     this.ws = new WorkspaceManager(path.join(this.opts.dataDir, 'worktrees'));
     this.planner = new Planner(this);
     this.reviewer = new Reviewer(this);
+    this.chat = new Chat(this);
   }
 
   get maxConcurrent(): number { return this.store.getSetting('maxConcurrentAgents', this.opts.maxConcurrent); }
@@ -110,6 +113,7 @@ export class Orchestrator {
     this.timer = null;
     await this.tickSettled();
     await this.planner.stop();
+    await this.chat.stop();
     await this.reviewer.stop();
     for (const up of this.preparing.values()) up.ac.abort();
     await Promise.all([...this.preparing.values()].map((up) => up.done));
@@ -159,6 +163,7 @@ export class Orchestrator {
     const busy = tasks.filter((t) => ['queued', 'running'].includes(t.status) || this.reviewer.isRunning(t.id));
     if (busy.length) throw new Conflict(`stop the running or queued tasks first: ${busy.map((t) => `#${t.id}`).join(', ')}`);
     if (this.store.runningPlans().some((x) => x.projectId === id)) throw new Conflict('the AI planner is running for this project; stop it first');
+    if (this.chat.busy(id)) throw new Conflict('the chat assistant is answering in this project; stop it first');
     let removed = 0;
     for (const t of tasks) {
       if (!t.workspace) continue;

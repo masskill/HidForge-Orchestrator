@@ -3,7 +3,7 @@ import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
   PermissionChip, Disclosure, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
-  Kanban, DagGraph, EventCard, statusTone, Progress,
+  Kanban, DagGraph, EventCard, statusTone, Progress, ChatBubble,
 } from './ui.js';
 
 const TOKEN = document.querySelector('meta[name="hidforge-token"]').content;
@@ -23,6 +23,7 @@ const PAGES = [
   { id: 'plan', label: 'План проєкту', icon: 'stages' },
   { id: 'tasks', label: 'Задачі', icon: 'tasks' },
   { id: 'planner', label: 'AI-планер', icon: 'planner' },
+  { id: 'chat', label: 'Чат з ШІ', icon: 'chat' },
   { id: 'agents', label: 'Агенти', icon: 'agents' },
   { id: 'activity', label: 'Журнал подій', icon: 'activity' },
   { id: 'costs', label: 'Витрати', icon: 'costs' },
@@ -151,6 +152,7 @@ async function reloadProject() {
     api('GET', `/api/events?projectId=${state.projectId}&type=task.status&before=9007199254740991&limit=14`)]);
   Object.assign(state, { project, tasks, plans, activity: activity.slice(-14).reverse() });
   state.projectSummaries[project.id] = projectTaskCounts(tasks);
+  if (state.page === 'chat') await loadChat().catch(() => {});
   [state.costs, state.planView] = await Promise.all([api('GET', `/api/projects/${state.projectId}/costs`).catch(() => null),
     api('GET', `/api/projects/${state.projectId}/plan-progress`).catch(() => null)]);
 }
@@ -173,9 +175,9 @@ function route() {
 function render() {
   renderShell();
   const pg = $('#page');
-  const needsProject = ['overview', 'plan', 'tasks', 'planner', 'activity', 'costs', 'reports'].includes(state.page);
+  const needsProject = ['overview', 'plan', 'tasks', 'planner', 'chat', 'activity', 'costs', 'reports'].includes(state.page);
   if (needsProject && !state.project) { pg.replaceChildren(noProject()); return; }
-  ({ projects: projectsPage, overview: overviewPage, plan: planPage, tasks: tasksPage, planner: plannerPage, agents: agentsPage,
+  ({ projects: projectsPage, overview: overviewPage, plan: planPage, tasks: tasksPage, planner: plannerPage, chat: chatPage, agents: agentsPage,
     activity: activityPage, costs: costsPage, models: modelsPage, reports: reportsPage, system: systemPage, settings: settingsPage })[state.page]();
 }
 const noProject = () => PanelCard({}, EmptyState({ icon: 'folder', title: 'Проєкт не відкрито',
@@ -1032,6 +1034,58 @@ function renderDiff(text) {
 const PLAN_STATUS = { running: ['генерується', 'info'], succeeded: ['готовий до перегляду', 'warning'], failed: ['помилка', 'danger'], canceled: ['скасовано', 'neutral'], applied: ['застосовано', 'success'], discarded: ['відхилено', 'neutral'] };
 const planBadge = (pl) => Badge(PLAN_STATUS[pl.status]?.[0] ?? pl.status, PLAN_STATUS[pl.status]?.[1], { live: pl.status === 'running' });
 
+// ---------------------------------------------------------------- page: chat
+async function loadChat() { state.chat = { projectId: state.projectId, ...(await api('GET', `/api/projects/${state.projectId}/chat`)) }; }
+const chatWho = (m) => (m.provider === 'mock' ? 'mock (демо, не AI)' : [m.provider, m.model, m.effort].filter(Boolean).join(' · '));
+function chatPage() {
+  const p = state.project;
+  if (state.chat?.projectId !== p.id) {
+    mount(PageHeader({ title: 'Чат з ШІ' }), PanelCard({}, EmptyState({ icon: 'chat', title: 'Завантаження розмови…' })));
+    loadChat().then(render).catch((e) => toast(e.message, 'danger'));
+    return;
+  }
+  const { messages, pending } = state.chat;
+  const hadFocus = document.activeElement?.getAttribute('aria-label') === 'Повідомлення'; // keep typing across live re-renders
+  const agents = agentList().filter((a) => a.available && (a.mock || a.capabilities.readOnlyMode === 'supported'));
+  const prov = Select([['auto', 'auto (за таблицею автовибору)'], ...agents.map((a) => [a.id, a.mock ? 'mock (демо, не AI)' : a.name])], state.chatProvider || 'auto',
+    { onchange: (e) => { state.chatProvider = e.target.value; } });
+  const model = ModelInput(prov, state.chatModel || null);
+  model.querySelector('input').addEventListener('input', (e) => { state.chatModel = e.target.value; });
+  const input = Textarea(state.chatDraft || '', { placeholder: 'Запитайте про код, план, задачі… (Ctrl+Enter — надіслати)', 'aria-label': 'Повідомлення',
+    oninput: (e) => { state.chatDraft = e.target.value; } });
+  const send = act(async () => {
+    const text = input.value.trim();
+    if (!text || state.chat.pending) return;
+    await api('POST', `/api/projects/${p.id}/chat`, { text, provider: prov.value, model: modelValue(model) });
+    state.chatDraft = ''; state.chatStep = '';
+    await loadChat(); render();
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+  const clear = act(async () => {
+    if (!await confirmModal('Очистити всю розмову в цьому проєкті? Повідомлення буде видалено назавжди.', { title: 'Очистити чат', danger: true, ok: 'Очистити' })) return;
+    await api('DELETE', `/api/projects/${p.id}/chat`); await loadChat(); render();
+  });
+  const log = h('div', { class: 'chat-log', role: 'log', 'aria-live': 'polite', 'aria-label': 'Розмова' },
+    ...(messages.length ? messages.map((m) => ChatBubble({ mine: m.role === 'user', text: m.text, error: m.error,
+      meta: `${m.role === 'user' ? 'Ви' : chatWho(m) || 'асистент'} · ${projectDate(m.createdAt)}` }))
+      : [EmptyState({ icon: 'chat', title: 'Розмови ще немає', text: 'Спитайте, як влаштований код, що робити далі чи як розбити ціль на задачі. Асистент читає репозиторій, але нічого не змінює.' })]),
+    pending ? h('div', { class: 'chat-pending' }, Badge('відповідає', 'accent', { live: true }), h('span', {}, chatWho(pending) || 'асистент'),
+      h('span', { id: 'chat-step', class: 'muted mono' }, state.chatStep || '')) : null);
+  mount(
+    PageHeader({ title: 'Чат з ШІ', subtitle: 'Пряма розмова з агентом про цей проєкт. Асистент читає код у режимі лише читання й нічого не змінює — зміни робляться через задачі.',
+      actions: GhostButton({ icon: 'trash', disabled: Boolean(pending) || !messages.length, onClick: clear }, 'Очистити') }),
+    PanelCard({ flush: true }, log),
+    PanelCard({ class: 'chat-composer' },
+      input,
+      h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' }, Field('Агент', prov), Field('Модель', model)),
+      h('div', { class: 'row wrap' }, PrimaryButton({ icon: 'send', disabled: Boolean(pending), onClick: send }, 'Надіслати'),
+        pending ? DangerButton({ icon: 'stop', onClick: act(async () => { await api('POST', `/api/projects/${p.id}/chat/cancel`); }) }, 'Зупинити') : null,
+        h('span', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Кожна відповідь — окремий запуск агента: витрачає ліміти підписки або, для API-агентів, гроші.'))),
+  );
+  log.scrollTop = log.scrollHeight;
+  if (hadFocus) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+}
+
 function plannerPage() {
   const p = state.project;
   const plan = state.plans[0];
@@ -1425,6 +1479,7 @@ function connectStream() {
     addLiveActivityEvent(e);
     if (e.taskId === state.taskId && state.editing == null) appendLog(e);
     if (e.type === 'plan.output') { appendPlanLog(e); return; }
+    if (e.type === 'chat.output') { state.chatStep = e.data.text; const el = document.getElementById('chat-step'); if (el) el.textContent = e.data.text; return; }
     if (isOutputEvent(e)) return;
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {

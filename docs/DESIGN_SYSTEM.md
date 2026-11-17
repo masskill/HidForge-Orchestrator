@@ -11,7 +11,7 @@
 | `web/styles/ui.css` | База, AppShell, усі компоненти, адаптивність |
 | `web/ui.js` | Компоненти як функції, що повертають DOM-вузли |
 | `web/index.html` | Каркас AppShell |
-| `web/app.js` | Роутер (`#/projects`, `#/overview`, `#/plan`, `#/tasks[/id]`, `#/planner`, `#/agents`, `#/activity`, `#/costs`, `#/models`, `#/reports`, `#/system`, `#/settings`) і сторінки, зібрані з компонентів |
+| `web/app.js` | Роутер (`#/projects`, `#/overview`, `#/plan`, `#/tasks[/id]`, `#/planner`, `#/chat`, `#/agents`, `#/activity`, `#/costs`, `#/models`, `#/reports`, `#/system`, `#/settings`) і сторінки, зібрані з компонентів |
 | `web/theme.js` | Тема до першого рендеру (без «спалаху») |
 
 ## Токени (темна тема)
@@ -49,6 +49,7 @@
 | `PanelCard({title, subtitle, actions, flush}, ...children)` | основна панель; `flush` — для таблиць |
 | `StatCard({label, value, hint, tone})` | великі числа на дашборді |
 | `Progress({value, label, tone})` | смуга приблизного прогресу з `role=progressbar`; число завжди поруч текстом; 100% — м'ятна |
+| `ChatBubble({ mine, meta, text, error })` | одне повідомлення чату: свої — праворуч (`--bg-active`), асистента — ліворуч, помилка — червона рамка й текст; текст завжди як звичайний текст (`pre-wrap`), ніколи як HTML |
 | `Disclosure(summary, ...children)` | згорнуті другорядні подробиці (`<details>`, працює з клавіатури); напр. можливості й примітки агента |
 | `StatLink({href, ...StatCard})` | StatCard як посилання на сторінку з деталями (напр. «Витрати» на огляді) |
 | `InfoList([[label, value]])` | пари InfoRow як `<dl>` |

@@ -106,6 +106,12 @@ const MIGRATIONS: string[] = [
   `alter table tasks add column category text; alter table tasks add column complexity text; alter table tasks add column effort text;
    alter table runs add column model text; alter table runs add column effort text; alter table runs add column category text;
    alter table runs add column complexity text; alter table runs add column review_verdict text;`,
+  // v6: chat with the assistant (one thread per project; the assistant runs read-only)
+  `create table chat_messages (
+    id integer primary key, project_id integer not null references projects(id) on delete cascade,
+    role text not null, text text not null, provider text, model text, effort text, usage text, error text, created_at text not null
+  );
+  create index chat_messages_project on chat_messages(project_id, id);`,
 ];
 
 export function openDb(file: string): DatabaseSync {
