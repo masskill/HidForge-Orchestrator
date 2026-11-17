@@ -1,41 +1,8 @@
-/* HidForge design tokens — the single source of colors, radii, spacing and type.
-   HidForge Orange (docs/DESIGN_SYSTEM.md): graphite surfaces, orange for action and focus, mint for success.
-   Dark is the default; light is an optional variant. Components use only these variables. */
+/* HidForge design tokens — the single source of colors, radii, spacing and type (docs/DESIGN_SYSTEM.md).
+   Appearance = palette (data-hf-style, 10 styles) × effective mode (data-hf-mode: dark | light), set on <html> by theme.js.
+   Rule: two calm colors (bg, surface) + one bright accent for the main action. Components use only the role tokens below,
+   never a style name. Palette HEX come from the HidForge Themes spec v1.0 and live only in this file. */
 :root {
-  /* surfaces */
-  --bg-app: #0B100E;
-  --bg-sidebar: #0E1511;
-  --bg-panel: #141C17;
-  --bg-panel-alt: #1A241E;
-  --bg-input: #1A241E;
-  --bg-active: #29251D;                 /* calm warm tint of an active zone */
-  --bg-hover: rgba(175, 187, 178, 0.07);
-
-  --border: #304037;
-  --border-soft: #26342C;
-  --border-strong: #46594D;             /* hover / emphasised neutral border — never bright orange */
-
-  --text: #F5F7F5;
-  --text-2: #AFBBB2;
-  --text-muted: #86948A;
-
-  /* brand accent: primary action, selected item, active stage */
-  --accent: #FF6B3D;
-  --accent-hover: #FF815A;
-  --accent-pressed: #E9572C;
-  --accent-soft: #3B241C;
-  --on-accent: #15110E;
-
-  /* states: mint = done / online / passed; orange is never an error */
-  --success: #47E0A1;
-  --success-soft: #193B2D;
-  --warning: #F5C467;
-  --warning-soft: rgba(245, 196, 103, 0.14);
-  --danger: #FF6870;
-  --danger-soft: rgba(255, 104, 112, 0.14);
-  --info: #64B7FF;
-  --info-soft: rgba(100, 183, 255, 0.14);
-
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
@@ -48,43 +15,280 @@
   --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
   --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 30px; --fs-stat: 30px;
   --tracking-id: 0.06em;
-
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --focus-color: #FF9A7A;
-  --focus: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--focus-color);
   --sidebar-w: 240px;
-  color-scheme: dark;
+
+  /* brand mark only (logo): the HidForge identity does not follow the chosen accent */
+  --brand-orange: #FF6B3D;
+  --brand-mint: #47E0A1;
 }
 
-/* Light variant: same roles; the accent is darkened on purpose for contrast. */
-:root[data-theme="light"] {
-  --bg-app: #F4F7F4;
-  --bg-sidebar: #EAF0EA;
-  --bg-panel: #FFFFFF;
-  --bg-panel-alt: #EDF2ED;
-  --bg-input: #FFFFFF;
-  --bg-active: #FFF0E9;
-  --bg-hover: rgba(20, 32, 24, 0.05);
-  --border: #CFDAD0;
-  --border-soft: #DEE7DF;
-  --border-strong: #A9B9AC;
-  --text: #142018;
-  --text-2: #4C6052;
-  --text-muted: #687B6C;
-  --accent: #B83D16;
-  --accent-hover: #9C3313;
-  --accent-pressed: #862A0F;
-  --accent-soft: #FFE9DE;
-  --on-accent: #FFFFFF;
-  --success: #137A50;
-  --success-soft: #DFF5EA;
-  --warning: #926000;
-  --warning-soft: rgba(146, 96, 0, 0.10);
+/* ---------------------------------------------------------------- palettes: 10 styles × dark/light
+   Required per set: bg, surface, text, muted, accent, on-accent, text-secondary, accent-fill.
+   accent-fill = fill of the primary button; differs from accent only where on-accent would miss 4.5:1
+   (Arctic Teal light: #008477 instead of #008678 — documented a11y variant). */
+[data-hf-style="obsidian-orange"][data-hf-mode="dark"] {
+  --hf-bg: #101312;
+  --hf-surface: #242826;
+  --hf-text: #F5F5F3;
+  --hf-muted: #A6ABA6;
+  --hf-accent: #FF7146;
+  --hf-on-accent: #151515;
+  --hf-text-secondary: #A6ABA6;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="obsidian-orange"][data-hf-mode="light"] {
+  --hf-bg: #F5F3F0;
+  --hf-surface: #FFFFFF;
+  --hf-text: #272825;
+  --hf-muted: #71746E;
+  --hf-accent: #C84B28;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #676C67;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="nordic-blue"][data-hf-mode="dark"] {
+  --hf-bg: #101720;
+  --hf-surface: #24303E;
+  --hf-text: #F0F5FB;
+  --hf-muted: #A2B0BF;
+  --hf-accent: #68ADFF;
+  --hf-on-accent: #102030;
+  --hf-text-secondary: #A2B0BF;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="nordic-blue"][data-hf-mode="light"] {
+  --hf-bg: #F1F5FA;
+  --hf-surface: #FFFFFF;
+  --hf-text: #1E2A39;
+  --hf-muted: #657384;
+  --hf-accent: #1967C5;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #5E6A78;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="royal-violet"][data-hf-mode="dark"] {
+  --hf-bg: #14131D;
+  --hf-surface: #292635;
+  --hf-text: #F7F4FC;
+  --hf-muted: #AAA5BA;
+  --hf-accent: #BE92FF;
+  --hf-on-accent: #1B1425;
+  --hf-text-secondary: #AAA5BA;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="royal-violet"][data-hf-mode="light"] {
+  --hf-bg: #F7F5FB;
+  --hf-surface: #FFFFFF;
+  --hf-text: #2C263C;
+  --hf-muted: #797185;
+  --hf-accent: #7947C8;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #6E677B;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="slate-lime"][data-hf-mode="dark"] {
+  --hf-bg: #141715;
+  --hf-surface: #292D28;
+  --hf-text: #F4F5EF;
+  --hf-muted: #AFB4AA;
+  --hf-accent: #C5EF52;
+  --hf-on-accent: #1C2510;
+  --hf-text-secondary: #AFB4AA;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="slate-lime"][data-hf-mode="light"] {
+  --hf-bg: #F5F6F0;
+  --hf-surface: #FFFFFF;
+  --hf-text: #2B3025;
+  --hf-muted: #777E70;
+  --hf-accent: #557B09;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #656D5E;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="arctic-teal"][data-hf-mode="dark"] {
+  --hf-bg: #101A1C;
+  --hf-surface: #243135;
+  --hf-text: #EFF9F8;
+  --hf-muted: #A2B5B6;
+  --hf-accent: #4CE2CD;
+  --hf-on-accent: #102421;
+  --hf-text-secondary: #A2B5B6;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="arctic-teal"][data-hf-mode="light"] {
+  --hf-bg: #EFF7F7;
+  --hf-surface: #FFFFFF;
+  --hf-text: #203737;
+  --hf-muted: #687C7C;
+  --hf-accent: #008678;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #5D7272;
+  --hf-accent-fill: #008477; /* a11y variant, >=4.5:1 white text */
+}
+[data-hf-style="champagne-gold"][data-hf-mode="dark"] {
+  --hf-bg: #181612;
+  --hf-surface: #302B23;
+  --hf-text: #FAF6EB;
+  --hf-muted: #B8B0A1;
+  --hf-accent: #F3BD62;
+  --hf-on-accent: #2B2010;
+  --hf-text-secondary: #B8B0A1;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="champagne-gold"][data-hf-mode="light"] {
+  --hf-bg: #F8F5ED;
+  --hf-surface: #FFFFFF;
+  --hf-text: #352C21;
+  --hf-muted: #817666;
+  --hf-accent: #936008;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #756958;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="berry-noir"][data-hf-mode="dark"] {
+  --hf-bg: #19141A;
+  --hf-surface: #30252F;
+  --hf-text: #FFF4FA;
+  --hf-muted: #B8A7B3;
+  --hf-accent: #F18DB9;
+  --hf-on-accent: #2B1321;
+  --hf-text-secondary: #B8A7B3;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="berry-noir"][data-hf-mode="light"] {
+  --hf-bg: #FCF5F8;
+  --hf-surface: #FFFFFF;
+  --hf-text: #3E2937;
+  --hf-muted: #82717C;
+  --hf-accent: #B33570;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #75636E;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="evergreen"][data-hf-mode="dark"] {
+  --hf-bg: #111A16;
+  --hf-surface: #28352E;
+  --hf-text: #F1F8F2;
+  --hf-muted: #A7B8AA;
+  --hf-accent: #72DF9B;
+  --hf-on-accent: #15301E;
+  --hf-text-secondary: #A7B8AA;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="evergreen"][data-hf-mode="light"] {
+  --hf-bg: #F3F7F0;
+  --hf-surface: #FFFFFF;
+  --hf-text: #26372B;
+  --hf-muted: #718175;
+  --hf-accent: #247E4B;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #647568;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="deep-ocean"][data-hf-mode="dark"] {
+  --hf-bg: #0B1723;
+  --hf-surface: #1B3040;
+  --hf-text: #EFF9FC;
+  --hf-muted: #A0B5C3;
+  --hf-accent: #4AD4ED;
+  --hf-on-accent: #092A33;
+  --hf-text-secondary: #A0B5C3;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="deep-ocean"][data-hf-mode="light"] {
+  --hf-bg: #F0F7FB;
+  --hf-surface: #FFFFFF;
+  --hf-text: #213748;
+  --hf-muted: #708695;
+  --hf-accent: #087C9B;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #5C7485;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="crimson-steel"][data-hf-mode="dark"] {
+  --hf-bg: #151719;
+  --hf-surface: #2B3033;
+  --hf-text: #F6F7F7;
+  --hf-muted: #ACB3B5;
+  --hf-accent: #FF7379;
+  --hf-on-accent: #331619;
+  --hf-text-secondary: #ACB3B5;
+  --hf-accent-fill: var(--hf-accent);
+}
+[data-hf-style="crimson-steel"][data-hf-mode="light"] {
+  --hf-bg: #F4F5F6;
+  --hf-surface: #FFFFFF;
+  --hf-text: #2A3033;
+  --hf-muted: #747C80;
+  --hf-accent: #C43847;
+  --hf-on-accent: #FFFFFF;
+  --hf-text-secondary: #646C70;
+  --hf-accent-fill: var(--hf-accent);
+}
+
+/* ---------------------------------------------------------------- semantic statuses per mode
+   success / warning / danger / info report state; they never replace the accent. Always paired with text or an icon. */
+[data-hf-mode="dark"] {
+  --success: #47E0A1;
+  --warning: #F5C467;
+  --danger: #FF8A90;
+  --info: #64B7FF;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --scrim: rgba(3, 6, 4, 0.62);
+  color-scheme: dark;
+}
+[data-hf-mode="light"] {
+  --success: #0F6E47;
+  --warning: #835600;
   --danger: #BD283D;
-  --danger-soft: rgba(189, 40, 61, 0.10);
   --info: #1369AC;
-  --info-soft: rgba(19, 105, 172, 0.10);
-  --shadow: 0 8px 24px rgba(20, 32, 24, 0.12);
-  --focus-color: #B83D16;
+  --shadow: 0 8px 24px rgba(20, 24, 28, 0.12);
+  --scrim: rgba(20, 24, 28, 0.42);
   color-scheme: light;
+}
+
+/* ---------------------------------------------------------------- roles used by components
+   Declared on every [data-hf-mode] scope (the page root and the small previews in Settings), so each scope derives
+   its own values. Everything here is a mix of the palette's own colors — no fourth hue. */
+[data-hf-mode] {
+  --hf-border: color-mix(in srgb, var(--hf-text) 13%, transparent);
+  --hf-divider: color-mix(in srgb, var(--hf-text) 9%, transparent);
+  --hf-hover: color-mix(in srgb, var(--hf-text) 6%, transparent);
+  --hf-focus-ring: color-mix(in srgb, var(--hf-accent) 65%, transparent);
+
+  /* the two calm layers */
+  --bg-app: var(--hf-bg);
+  --bg-sidebar: color-mix(in srgb, var(--hf-surface) 45%, var(--hf-bg));
+  --bg-panel: var(--hf-surface);
+  --bg-panel-alt: color-mix(in srgb, var(--hf-text) 4%, var(--hf-surface));
+  --bg-input: color-mix(in srgb, var(--hf-bg) 50%, var(--hf-surface));
+  --bg-active: color-mix(in srgb, var(--hf-text) 6%, var(--hf-surface));   /* selected zone: neutral, not accent */
+  --bg-hover: var(--hf-hover);
+
+  --border: var(--hf-border);
+  --border-soft: var(--hf-divider);
+  --border-strong: color-mix(in srgb, var(--hf-text) 24%, transparent);
+
+  /* text: small secondary text always uses text-secondary (light "muted" is too pale for text) */
+  --text: var(--hf-text);
+  --text-2: color-mix(in srgb, var(--hf-text) 22%, var(--hf-text-secondary));
+  --text-muted: color-mix(in srgb, var(--hf-text) 8%, var(--hf-text-secondary));
+
+  /* the one accent: primary action, selected marker, focus */
+  --accent: var(--hf-accent);
+  --accent-fill: var(--hf-accent-fill);
+  --accent-hover: color-mix(in srgb, var(--hf-accent-fill) 86%, var(--hf-text));
+  --accent-pressed: color-mix(in srgb, var(--hf-accent-fill) 74%, var(--hf-text));
+  --accent-soft: color-mix(in srgb, var(--hf-accent) 14%, var(--hf-surface));
+  --accent-text: color-mix(in srgb, var(--hf-accent) 80%, var(--hf-text));   /* accent as small text: >= 4.5:1 */
+  --on-accent: var(--hf-on-accent);
+
+  --success-soft: color-mix(in srgb, var(--success) 12%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 12%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+
+  --focus-color: var(--hf-accent);
+  --focus: 0 0 0 2px var(--hf-bg), 0 0 0 4px var(--focus-color);
 }

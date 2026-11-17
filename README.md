@@ -102,7 +102,7 @@ The interface is in Ukrainian; button names below are translated.
 8. **Review the results.** The Overview, Costs and Reports pages show the summary, spending and a markdown report with the decision log (ADR).
 
 ## Settings
-In the UI (**Settings**): theme, number of parallel agents, auto-selection policy, project budget, AI reviewer, role templates (instructions, read-only, allowed agents), Cursor trust for worktrees, optional WSL / SSH agents.
+In the UI (**Settings**): appearance (10 styles × dark / light / system), number of parallel agents, auto-selection policy, project budget, AI reviewer, role templates (instructions, read-only, allowed agents), Cursor trust for worktrees, optional WSL / SSH agents.
 
 Startup settings live in a `.env` file (copy [.env.example](.env.example)). It holds no secrets:
 

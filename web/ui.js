@@ -62,15 +62,15 @@ export function icon(name, cls = '') {
   svg.append(p);
   return svg;
 }
-/** Product mark: original "DAG node" glyph — orange flow into a mint (done) node, on a graphite tile. */
+/** Product mark: original "DAG node" glyph — orange flow into a mint (done) node. Brand colors, not the chosen accent. */
 export function logo() {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 34 34'); svg.setAttribute('class', 'logo'); svg.setAttribute('aria-hidden', 'true');
   const add = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); svg.append(e); };
   add('rect', { x: 1, y: 1, width: 32, height: 32, rx: 10, fill: 'var(--bg-panel-alt)', stroke: 'var(--border)' });
-  add('path', { d: 'M11 11L23 17M11 23L23 17M11 11v12', stroke: 'var(--accent)', 'stroke-width': 2, fill: 'none', 'stroke-linecap': 'round' });
-  for (const [x, y, c] of [[11, 11, 'accent'], [11, 23, 'accent'], [23, 17, 'success']]) add('circle', { cx: x, cy: y, r: 3.2, fill: `var(--${c})` });
+  add('path', { d: 'M11 11L23 17M11 23L23 17M11 11v12', stroke: 'var(--brand-orange)', 'stroke-width': 2, fill: 'none', 'stroke-linecap': 'round' });
+  for (const [x, y, c] of [[11, 11, 'brand-orange'], [11, 23, 'brand-orange'], [23, 17, 'brand-mint']]) add('circle', { cx: x, cy: y, r: 3.2, fill: `var(--${c})` });
   return svg;
 }
 
@@ -204,6 +204,30 @@ export function Segmented(items, active, onChange) {
     type: 'button', 'aria-pressed': String(it.id === active), 'aria-selected': String(it.id === active), onclick: () => onChange(it.id),
   }, it.label, it.count != null ? h('span', { class: 'count' }, it.count) : null)));
 }
+
+/** RadioSegmented({ name, label, items: [[id, label]], value, onChange }) — one choice with the Tabs look; real radios, so arrow keys work. */
+export const RadioSegmented = ({ name, label, items, value, onChange }) => h('div', { class: 'tabs radio-seg', role: 'radiogroup', 'aria-label': label },
+  ...items.map(([id, text]) => h('label', {}, h('input', { type: 'radio', class: 'sr-only', name, value: id, checked: id === value, onchange: () => onChange(id) }), text)));
+
+// ---------------------------------------------------------------- appearance (themes)
+// A [data-hf-style][data-hf-mode] element is its own theme scope: tokens.css derives every role token inside it.
+/** ThemeSample({ styleId, mode, followMode }) — tiny palette sample: background, a surface card with text lines, one accent button. */
+export const ThemeSample = ({ styleId, mode, followMode }) => h('span', { class: 'theme-sample', 'data-hf-style': styleId, 'data-hf-mode': mode, 'data-hf-follow-mode': followMode, 'aria-hidden': 'true' },
+  h('span', { class: 'ts-side' }), h('span', { class: 'ts-card' }, h('span', { class: 'ts-line' }), h('span', { class: 'ts-line short' }), h('span', { class: 'ts-btn' })));
+/** StyleCard({ group, styleId, name, text, checked, mode, onChange }) — a choosable palette (radio): sample, name, description, «Вибрано» mark. */
+export const StyleCard = ({ group, styleId, name, text, checked, mode, onChange }) => h('label', { class: 'style-card' },
+  h('input', { type: 'radio', class: 'sr-only', name: group, value: styleId, checked, onchange: () => onChange(styleId) }),
+  ThemeSample({ styleId, mode, followMode: true }),
+  h('span', { class: 'style-card-head' }, h('strong', {}, name), h('span', { class: 'sel-mark' }, icon('check'), 'Вибрано')),
+  h('span', { class: 'style-card-text' }, text));
+/** AppearancePreview({ styleId, mode, label }) — miniature of the real interface (navigation, card, status, primary + secondary button) in one palette. Inert. */
+export const AppearancePreview = ({ styleId, mode, label }) => h('div', { class: 'appearance-preview', 'data-hf-style': styleId, 'data-hf-mode': mode, 'data-hf-follow-style': true, inert: true, 'aria-label': `Попередній перегляд: ${label}`, role: 'img' },
+  h('div', { class: 'ap-side' }, h('div', { class: 'brand' }, logo(), h('div', {}, 'HidForge')),
+    h('nav', { class: 'nav' }, h('a', { 'aria-current': 'page' }, icon('overview'), 'Огляд'), h('a', {}, icon('tasks'), 'Задачі', h('span', { class: 'count' }, '4')), h('a', {}, icon('agents'), 'Агенти'))),
+  h('div', { class: 'ap-main' }, h('div', { class: 'ap-label' }, label),
+    h('div', { class: 'panel' }, h('div', { class: 'row' }, h('strong', {}, 'Додати вхід через e-mail'), Badge('виконано', 'success')),
+      h('div', { class: 'text-2' }, 'Агент Claude Code · модель sonnet'), h('div', { class: 'muted' }, '2 файли змінено, перевірки пройдено'),
+      h('div', { class: 'row' }, Button({ icon: 'play' }, 'Запустити'), Button({ variant: 'secondary' }, 'Скасувати')))));
 
 // ---------------------------------------------------------------- Table
 /** Table({ columns: [{ label, render(row), class }], rows, onRowClick, selected(row), empty }) — collapses to cards ≤720px. */

@@ -3,7 +3,7 @@ import {
   h, icon, logo, Button, PrimaryButton, SecondaryButton, GhostButton, DangerButton, IconButton, Badge, StatusBadge, STATUS_LABEL,
   PermissionChip, Disclosure, PageHeader, SectionHeader, PanelCard, StatCard, StatLink, InfoList, ItemCard, EmptyState, ActivityFeed, Field, TextInput,
   Textarea, Select, SearchInput, Toggle, Tabs, Segmented, Table, openModal, confirmModal, promptModal, DropdownMenu, toast,
-  Kanban, DagGraph, EventCard, statusTone, Progress, ChatBubble,
+  Kanban, DagGraph, EventCard, statusTone, Progress, ChatBubble, RadioSegmented, StyleCard, AppearancePreview,
 } from './ui.js';
 
 const TOKEN = document.querySelector('meta[name="hidforge-token"]').content;
@@ -662,7 +662,7 @@ function planPage() {
         h('span', { class: 'row' }, h('span', { class: 'mono' }, [t.agent?.provider, t.agent?.model, t.agent?.effort].filter(Boolean).join(' · ')), h('span', { class: 'muted' }, `спроба ${t.attempts}/${t.maxAttempts}`)))))
         : EmptyState({ icon: 'agents', title: 'Зараз ніхто не працює', text: 'Задачі запускаються, коли їхні залежності злито і є вільний слот для агента.' })),
     ...v.stages.map((s) => PanelCard({ flush: true, title: `Етап ${s.n}`, subtitle: `${s.done} з ${s.total} задач злито · приблизно ${s.pct}%`, actions: stageBadge(s) },
-      h('div', { class: 'progress-row' }, Progress({ value: s.pct, label: `Виконання етапу ${s.n}` })),
+      h('div', { class: 'progress-row' }, Progress({ value: s.pct, label: `Виконання етапу ${s.n}`, tone: 'neutral' })),
       Table({ columns: [
         { label: 'Задача', class: 'grow', render: (t) => h('a', { href: `#/tasks/${t.id}`, class: 'wrap' }, h('span', { class: 'id' }, `#${t.id}`), ' ', t.title) },
         { label: 'Тип · складність', render: (t) => kindLabel(t) || '—' },
@@ -1231,7 +1231,6 @@ function settingsPage() {
   const s = state.settings || {};
   const maxConc = Select(Array.from({ length: 8 }, (_, i) => String(i + 1)), s.maxConcurrentAgents, { onchange: act(async (e) => { await api('PUT', '/api/settings', { maxConcurrentAgents: Number(e.target.value) }); await loadSettings(); renderShell(); toast('Збережено', 'success'); }) });
   const routing = Select(['cost-first', 'balanced', 'quality-first'], s.routingPolicy, { onchange: act(async (e) => { await api('PUT', '/api/settings', { routingPolicy: e.target.value }); await loadSettings(); renderShell(); toast('Збережено', 'success'); }) });
-  const theme = Select([['dark', 'Темна (за замовчуванням)'], ['light', 'Світла'], ['system', 'Як у системі']], ls.get('hf-theme') || 'dark', { onchange: (e) => { ls.set('hf-theme', e.target.value); applyTheme(); } });
   const p = state.project;
   let cmds = null;
   if (p) { cmds = Textarea(p.allowedCommands.join('\n'), { placeholder: 'Одна команда на рядок, напр. npm test' }); }
@@ -1240,11 +1239,11 @@ function settingsPage() {
     PanelCard({}, h('div', { class: 'row' },
       h('span', { class: 'text-2' }, 'Витрати й бюджет → '), h('a', { href: '#/costs' }, 'Витрати'),
       h('span', { class: 'text-2' }, '· Діагностика, копії, версія → '), h('a', { href: '#/system' }, 'Система'))),
-    h('div', { class: 'grid cols-2' },
-      PanelCard({ title: 'Виконання', subtitle: 'Глобально для всіх проєктів' },
+    PanelCard({ title: 'Виконання', subtitle: 'Глобально для всіх проєктів' },
+      h('div', { class: 'form-grid', style: 'grid-template-columns:repeat(auto-fit,minmax(240px,1fr))' },
         Field('Паралельних агентів', maxConc, 'Скільки задач можуть виконуватися одночасно'),
-        Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними')),
-      PanelCard({ title: 'Вигляд' }, Field('Тема', theme, 'Зберігається лише в цьому браузері'))),
+        Field('Політика автовибору', routing, 'cost-first — дешевші агенти; quality-first — найсильніші; balanced — між ними'))),
+    appearanceSettings(),
     ...(routingSettings() || []),
     apiSettings(),
     p ? reviewSettings(p) : null,
@@ -1461,11 +1460,32 @@ function reviewSettings(p) {
       await reloadProject(); toast('Політику рецензії збережено', 'success'); render();
     }) }, 'Зберегти')));
 }
-function applyTheme() {
-  let t = ls.get('hf-theme') || 'dark';
-  if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', t);
+// ---------------------------------------------------------------- appearance (10 styles × dark/light + system; manager in theme.js)
+const MODE_LABEL = { system: 'Як у системі', dark: 'Темна', light: 'Світла' };
+const effectiveHint = (a) => `Зараз: ${a.effective === 'dark' ? 'темна' : 'світла'}${a.mode === 'system' ? ' (за налаштуванням Windows)' : ''}`;
+function appearanceSettings() {
+  const T = window.HFTheme;
+  const a = T.get();
+  return PanelCard({ id: 'appearance', title: 'Зовнішній вигляд', subtitle: 'Стиль і режим застосовуються до всього застосунку одразу й зберігаються в цьому браузері' },
+    h('div', { class: 'field' }, h('span', { class: 'label', id: 'hf-mode-label' }, 'Режим'),
+      h('div', {}, RadioSegmented({ name: 'hf-mode', label: 'Режим', items: T.MODES.map((m) => [m, MODE_LABEL[m]]), value: a.mode, onChange: (mode) => T.set({ mode }) })),
+      h('span', { class: 'hint', id: 'hf-effective' }, effectiveHint(a))),
+    h('div', { class: 'appearance-previews' },
+      AppearancePreview({ styleId: a.styleId, mode: 'dark', label: 'Темна' }), AppearancePreview({ styleId: a.styleId, mode: 'light', label: 'Світла' })),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Стиль'),
+      h('div', { class: 'style-grid', role: 'radiogroup', 'aria-label': 'Стиль' }, ...T.STYLES.map((s) => StyleCard({
+        group: 'hf-style', styleId: s.id, name: s.name, text: s.text, checked: s.id === a.styleId, mode: a.effective, onChange: (styleId) => T.set({ styleId }) })))),
+    h('div', { class: 'row wrap' }, GhostButton({ icon: 'refresh', onClick: () => { T.reset(); toast('Повернуто типовий вигляд: Obsidian Orange, режим «Як у системі»', 'success'); } }, 'Скинути до типового'),
+      h('span', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Типово: Obsidian Orange, режим «Як у системі».')));
 }
+// Keep the picker and its samples in step with the current choice (this tab, another tab, or a Windows theme switch).
+addEventListener('hf-appearance', (e) => {
+  const a = e.detail;
+  for (const el of document.querySelectorAll('[data-hf-follow-mode]')) el.dataset.hfMode = a.effective;
+  for (const el of document.querySelectorAll('[data-hf-follow-style]')) el.dataset.hfStyle = a.styleId;
+  for (const r of document.querySelectorAll('input[name="hf-style"], input[name="hf-mode"]')) r.checked = r.value === (r.name === 'hf-style' ? a.styleId : a.mode);
+  const hint = document.getElementById('hf-effective'); if (hint) hint.textContent = effectiveHint(a);
+});
 
 // ---------------------------------------------------------------- live stream
 let refreshTimer = null;
@@ -1500,7 +1520,6 @@ $('#menuSlot').replaceWith(IconButton({ icon: 'menu', label: 'Меню', class: 
 $('#scrim').onclick = () => document.body.classList.remove('nav-open');
 $('#projectSel').onchange = act(async (e) => { if (e.target.value) await selectProject(Number(e.target.value)); });
 addEventListener('hashchange', () => { route(); render(); $('#page').focus({ preventScroll: true }); });
-matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
 
 route();
 await Promise.all([loadSettings(), loadProjects()]).catch((e) => toast(e.message, 'danger'));
