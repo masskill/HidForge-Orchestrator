@@ -374,8 +374,11 @@ export class Orchestrator {
   retry(id: number): Task {
     const t = this.store.getTask(id);
     if (!['failed', 'blocked'].includes(t.status)) throw new Conflict(`cannot retry a ${t.status} task`);
+    // stopped on a failed check: the next attempt gets that check's error lines (also for tasks blocked before this was recorded)
+    const v = [...t.evidence].reverse().find((e) => e.kind === 'verify');
+    const feedback = v && !v.ok && t.feedback?.startsWith('verification failed') ? verifyFeedback(v.summary.replace(/ -> exit \d+$/, ''), { code: Number(/exit (\d+)$/.exec(v.summary)?.[1] ?? 1), out: v.detail ?? '' }) : t.feedback;
     // a manual retry starts the agent chain over (otherwise it would keep landing on the last fallback link)
-    return this.store.setStatus(id, 'queued', { maxAttempts: Math.max(t.maxAttempts, t.attempts + 1), notBefore: null,
+    return this.store.setStatus(id, 'queued', { feedback, maxAttempts: Math.max(t.maxAttempts, t.attempts + 1), notBefore: null,
       artifacts: { ...t.artifacts, chainFrom: t.attempts } }, 'manual retry');
   }
 
