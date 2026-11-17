@@ -588,7 +588,9 @@ export class Orchestrator {
       w = await this.ws.ensure(p.repoPath, p.baseBranch, p.id, t.id, t.workspace);
     } catch (e) { this.failTask(t, `workspace error: ${(e as Error).message}`); return false; }
     t = this.store.patchTask(t.id, { workspace: w.workspace, branch: w.branch, baseCommit: w.created ? w.baseCommit : (t.baseCommit ?? w.baseCommit) });
-    if (t.artifacts.needsRebase) t = await this.rebaseOntoBase(t, p);
+    // a repair attempt works on the current base: fixes merged meanwhile (an Integrator, other tasks) are brought in first
+    const baseMoved = !w.created && t.baseCommit && (await git(p.repoPath, ['rev-parse', p.baseBranch])).stdout.trim() !== t.baseCommit;
+    if (t.artifacts.needsRebase || baseMoved) t = await this.rebaseOntoBase(t, p);
 
     let run: Run;
     try { run = this.store.beginRun(t, w.workspace, adapter.mock, used); }
