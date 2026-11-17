@@ -61,5 +61,7 @@ const shutdown = async () => {
   await orch.stop();
   process.exit(0);
 };
+// a bug in background work (auto-fix, review, a timer) is logged; it must not take the whole server down
+process.on('unhandledRejection', (e) => console.error('[background error]', e));
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

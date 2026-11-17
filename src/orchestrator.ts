@@ -24,6 +24,9 @@ import { projectCosts, cellStats } from './costs.ts';
 import { detectLimit, type LimitHit } from './limits.ts';
 import { CATEGORIES, COMPLEXITIES, EFFORTS, DEFAULT_CEILING, DEFAULT_MATRIX, resolveChain, reorderByStats, effortFlagFor, type Effort, type Link, type Matrix } from './routing.ts';
 
+/** How often the autopilot looks again at every project (start of the server included). */
+const SWEEP_MS = 5 * 60_000;
+
 export interface OrchestratorOptions {
   dataDir: string;
   maxConcurrent?: number;
@@ -64,6 +67,7 @@ export class Orchestrator {
   private readonly pending = new Set<Promise<unknown>>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
+  private lastSweep = 0;
   private mergeChain: Promise<unknown> = Promise.resolve();
 
   constructor(o: OrchestratorOptions) {
@@ -88,7 +92,7 @@ export class Orchestrator {
     // auto-fix: a task that ends up blocked or failed is diagnosed (when the project has it on); deferred so the status change completes first
     this.store.bus.on('event', (ev: { type: string; taskId: number | null; data: { to?: string; note?: string } | null }) => {
       if (ev.type === 'task.status' && ev.taskId && ['blocked', 'failed'].includes(String(ev.data?.to)))
-        setImmediate(() => { if (this.timer) void this.track(this.doctor.maybeStart(ev.taskId!, ev.data?.note)); });
+        setImmediate(() => { if (this.timer) void this.track(this.doctor.maybeStart(ev.taskId!, ev.data?.note)).catch(() => {}); });
     });
   }
 
@@ -239,6 +243,7 @@ export class Orchestrator {
     await this.reviewer.recover(); // first: recover() may re-run gates, which can start fresh reviews
     await this.recover();
     await this.planner.recover();
+    this.doctor.recover();
     this.timer = setInterval(() => { void this.tick(); }, this.opts.tickMs);
   }
 
@@ -442,8 +447,16 @@ export class Orchestrator {
     const res = await this.ws.merge(p.repoPath, p.baseBranch, t.branch, `HidForge: merge task #${t.id} ${t.title}`);
     if (!res.ok) {
       this.store.addEvidence(id, { kind: 'merge', ok: false, summary: res.conflicts.length ? `Merge conflict in: ${res.conflicts.join(', ')}` : res.reason, detail: res.reason });
-      return this.store.setStatus(id, 'blocked', { artifacts: { ...t.artifacts, mergeConflict: res.conflicts, needsRebase: res.conflicts.length > 0 } },
+      const b = this.store.setStatus(id, 'blocked', { artifacts: { ...t.artifacts, mergeConflict: res.conflicts, needsRebase: res.conflicts.length > 0 } },
         'merge failed; task branch preserved');
+      // auto-fix: a conflict with what was merged meanwhile goes straight to a repair attempt (base merged in, the agent resolves it)
+      const repairs = Number(b.artifacts.conflictRepairs ?? 0);
+      if (res.conflicts.length && p.reviewPolicy.autoFix && repairs < 3) {
+        this.store.patchTask(id, { artifacts: { ...b.artifacts, conflictRepairs: repairs + 1 } });
+        this.store.addEvidence(id, { kind: 'integration', ok: true, summary: `Auto-fix: the conflict goes back to the agent with the current ${p.baseBranch} merged in (repair ${repairs + 1} of 3)` });
+        return this.retry(id);
+      }
+      return b;
     }
     this.store.addEvidence(id, { kind: 'merge', ok: true, summary: `Merged into ${p.baseBranch} as ${res.commit.slice(0, 10)}` });
     t = this.store.setStatus(id, 'merged', { artifacts: { ...t.artifacts, mergeCommit: res.commit, mergedDiff } });
@@ -466,9 +479,16 @@ export class Orchestrator {
 
   /** A failed post-merge check becomes a separate Integrator task — a draft, so nothing runs without the user. */
   private createIntegrator(t: Task, p: Project, failed: { cmd: string; out: string }[]): Task {
+    const open = this.store.listTasks(p.id).find((x) => x.assignedRole === 'Integrator' && !['merged', 'canceled'].includes(x.status));
+    if (open) { // one repair of the base branch at a time: the open one runs the same checks
+      this.store.patchTask(t.id, { artifacts: { ...this.store.getTask(t.id).artifacts, integratorTaskId: open.id } });
+      this.store.addEvidence(t.id, { kind: 'integrator', ok: false, summary: `Integration check failed on ${p.baseBranch}; Integrator #${open.id} is already open for it` });
+      return open;
+    }
+    const auto = p.reviewPolicy.autoFix;
     const it = this.createTask(p.id, {
       title: `Integrator: fix ${p.baseBranch} after #${t.id} ${t.title}`.slice(0, 200),
-      assignedRole: 'Integrator', provider: t.provider, model: t.model, maxAttempts: 2, allowedPaths: [],
+      assignedRole: 'Integrator', provider: t.provider, model: t.model, maxAttempts: 3, allowedPaths: [], category: 'bugfix', complexity: 'low',
       verifyCommands: failed.map((f) => f.cmd),
       description: `Task #${t.id} "${t.title}" was merged into ${p.baseBranch}, and these integration checks now fail on ${p.baseBranch}:\n\n`
         + failed.map((f) => `$ ${f.cmd}\n${maskSecrets(f.out).slice(-3000)}`).join('\n\n')
@@ -476,8 +496,8 @@ export class Orchestrator {
       acceptanceCriteria: failed.map((f) => `\`${f.cmd}\` exits 0`).join('\n'),
     });
     this.store.patchTask(t.id, { artifacts: { ...this.store.getTask(t.id).artifacts, integratorTaskId: it.id } });
-    this.store.addEvidence(t.id, { kind: 'integrator', ok: false, summary: `Integration check failed on ${p.baseBranch}; Integrator draft #${it.id} created` });
-    return it;
+    this.store.addEvidence(t.id, { kind: 'integrator', ok: false, summary: `Integration check failed on ${p.baseBranch}; Integrator ${auto ? `#${it.id} started (auto-fix)` : `draft #${it.id} created`}` });
+    return auto ? this.submit(it.id) : it;
   }
 
   // ------------------------------------------------------------------ scheduler
@@ -492,13 +512,23 @@ export class Orchestrator {
         if (!projects.has(t.projectId)) projects.set(t.projectId, new Map(this.store.listTasks(t.projectId).map((x) => [x.id, x])));
         if (depsSatisfied(t, projects.get(t.projectId)!)) this.store.setStatus(t.id, 'queued', {}, 'dependencies merged');
       }
+      // autopilot sweep at start and every few minutes: nothing stays stuck after a restart or a missed event
+      if (Date.now() - this.lastSweep > SWEEP_MS) {
+        this.lastSweep = Date.now();
+        for (const p of this.store.listProjects()) void this.track(this.autopilot(p.id)).catch(() => {});
+      }
       const nowIso = new Date().toISOString();
       let free = this.maxConcurrent - this.store.liveRuns().length;
       const paused = new Set(this.pausedProjects());
-      for (const t of this.store.tasksByStatus('queued')) {
+      const queued = this.store.tasksByStatus('queued');
+      // the base branch is broken and an Integrator is repairing it: other tasks of the project wait, they would fail on its errors
+      const repairing = new Set([...queued, ...this.store.tasksByStatus('running'), ...this.store.tasksByStatus('review')]
+        .filter((t) => t.assignedRole === 'Integrator').map((t) => t.projectId));
+      for (const t of queued) {
         if (free <= 0) break;
         if (t.notBefore && t.notBefore > nowIso) continue;
         if (paused.has(t.projectId)) continue;
+        if (repairing.has(t.projectId) && t.assignedRole !== 'Integrator') continue;
         if (await this.startRun(t)) free--;
       }
     } catch (e) {

@@ -10,6 +10,9 @@ import { extractJson, runOnce, resolveReadOnlyAgent } from './oneshot.ts';
 
 const NL = '\n';
 export const MAX_FIXES = 2;
+/** With auto-answer on the owner has handed the work over: more diagnoses, each restarting the agent chain (another model). */
+export const MAX_FIXES_AUTO = 4;
+export function maxFixes(autoAnswer: boolean): number { return autoAnswer ? MAX_FIXES_AUTO : MAX_FIXES; }
 /** Statuses set by a human decision: the doctor never overrides them. */
 const HUMAN_NOTES = ['rejected', 'command denied', 'canceled by user'];
 
@@ -120,14 +123,15 @@ export class Doctor {
     if (!['blocked', 'failed'].includes(t.status) || !store.getProject(t.projectId).reviewPolicy.autoFix) return Promise.resolve();
     if (note && HUMAN_NOTES.some((n) => note.startsWith(n))) return Promise.resolve();
     if (t.artifacts.ownerQuestion || this.orch.isPaused(t.projectId)) return Promise.resolve();
-    if (Number(t.artifacts.autoFixes ?? 0) >= MAX_FIXES) {
+    const max = maxFixes(store.getProject(t.projectId).reviewPolicy.autoAnswer);
+    if (Number(t.artifacts.autoFixes ?? 0) >= max) {
       if (!t.artifacts.autoFixExhausted) {
         store.patchTask(t.id, { artifacts: { ...t.artifacts, autoFixExhausted: true } });
-        store.addEvidence(t.id, { kind: 'doctor', ok: false, summary: `Auto-fix already tried ${MAX_FIXES} times — the task needs a human decision` });
+        store.addEvidence(t.id, { kind: 'doctor', ok: false, summary: `Auto-fix already tried ${max} times — the task needs a human decision` });
       }
       return Promise.resolve();
     }
-    return this.start(taskId).then(() => {}, () => {});
+    try { return this.start(taskId).then(() => {}, () => {}); } catch { return Promise.resolve(); } // already queued: nothing to do
   }
 
   /** Queue a diagnosis (also the manual "auto-fix" button). One diagnosis runs at a time. */
@@ -135,12 +139,21 @@ export class Doctor {
     const { store } = this.orch;
     const t = store.getTask(taskId);
     if (!['blocked', 'failed'].includes(t.status)) throw new Conflict(`auto-fix works on blocked or failed tasks, not ${t.status}`);
-    if (this.waiting.has(taskId) || (t.artifacts.doctor as Diagnosis | undefined)?.status === 'running') throw new Conflict('auto-fix is already working on this task');
+    if (this.waiting.has(taskId)) throw new Conflict('auto-fix is already working on this task');
     this.waiting.add(taskId);
     const job = this.queue.then(() => this.run(taskId)).finally(() => this.waiting.delete(taskId));
     this.queue = job.catch(() => {});
     void this.orch.track(job.catch(() => {}));
     return Promise.resolve(store.getTask(taskId));
+  }
+
+  /** On startup: a diagnosis that was running when the server stopped is marked failed, so the autopilot sweep diagnoses again. */
+  recover(): void {
+    const { store } = this.orch;
+    for (const p of store.listProjects()) for (const t of store.listTasks(p.id)) {
+      if ((t.artifacts.doctor as Diagnosis | undefined)?.status !== 'running') continue;
+      this.save(t.id, { ...(t.artifacts.doctor as Diagnosis), status: 'failed', error: 'interrupted by orchestrator restart' });
+    }
   }
 
   private save(id: number, d: Diagnosis, extra: Record<string, unknown> = {}): void {

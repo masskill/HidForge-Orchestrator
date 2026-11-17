@@ -238,6 +238,8 @@ export class Planner {
       store.updatePlan(planId, { status: 'applied', appliedTaskIds: out.map((t) => t.id) });
       return out;
     });
+    // auto-answer: the owner handed the work over, so an accepted plan starts at once (dependencies still go in order)
+    if (store.getProject(plan.projectId).reviewPolicy.autoAnswer) return created.map((t) => this.orch.submit(t.id));
     return created;
   }
 

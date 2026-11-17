@@ -1130,7 +1130,7 @@ function chatPlanCard(m) {
     h('div', { class: 'row wrap' }, icon('planner'), h('strong', {}, `План: ${pl.tasks} ${plural(pl.tasks, 'задача', 'задачі', 'задач')}`), Badge(label, tone)),
     pl.summary ? h('div', { class: 'text-2' }, pl.summary) : null,
     h('div', { class: 'row wrap' },
-      pl.status === 'succeeded' ? SecondaryButton({ size: 'sm', icon: 'check', onClick: act(async () => { await api('POST', `/api/plans/${pl.id}/apply`, {}); await done('Створено чернетки задач — перевірте й запустіть план'); }) }, `Створити ${pl.tasks} ${plural(pl.tasks, 'чернетку', 'чернетки', 'чернеток')}`) : null,
+      pl.status === 'succeeded' ? SecondaryButton({ size: 'sm', icon: 'check', onClick: act(async () => { const ts = await api('POST', `/api/plans/${pl.id}/apply`, {}); await done(ts[0]?.status === 'draft' ? 'Створено чернетки задач — перевірте й запустіть план' : 'Задачі створено й запущено — далі все йде автоматично'); }) }, `Створити ${pl.tasks} ${plural(pl.tasks, 'чернетку', 'чернетки', 'чернеток')}`) : null,
       pl.status === 'applied' ? GhostButton({ size: 'sm', icon: 'tasks', onClick: () => go('#/tasks') }, 'До задач') : null,
       GhostButton({ size: 'sm', icon: 'planner', onClick: () => go('#/planner') }, 'Детально в AI-планері'),
       pl.status === 'succeeded' ? GhostButton({ size: 'sm', icon: 'close', onClick: act(async () => { await api('POST', `/api/plans/${pl.id}/discard`); await done('План відхилено'); }) }, 'Відхилити') : null));
@@ -1258,7 +1258,7 @@ function planResult(plan) {
       GhostButton({ onClick: discard }, 'Відхилити'),
       PrimaryButton({ icon: 'check', onClick: act(async () => {
         const tasks = await api('POST', `/api/plans/${plan.id}/apply`, { provider: applyProv.value });
-        toast(`Створено ${tasks.length} чернеток`, 'success'); await reloadProject(); render();
+        toast(tasks[0]?.status === 'draft' ? `Створено ${tasks.length} чернеток` : `Створено й запущено ${tasks.length} задач — далі все йде автоматично`, 'success'); await reloadProject(); render();
       }) }, 'Додати як чернетки')));
 }
 
@@ -1570,8 +1570,8 @@ function reviewSettings(p) {
       Field('Режим', mode), Field('Агент-рецензент', prov, state.agents ? null : 'перевірка агентів…'), Field('Модель', model)),
     h('div', { class: 'stack' },
       Toggle({ label: 'Автоприйняття — зливати зміни самостійно, коли пройдені перевірки й AI-рецензія «схвалено» (вмикає обов\'язкову рецензію)', checked: flags.autoMerge, onChange: (v) => { flags.autoMerge = v; } }),
-      Toggle({ label: 'Автовиправлення — коли задача заблокована, ШІ з\'ясовує причину, виправляє задачу й запускає знову або ставить вам просте питання (до 2 разів на задачу; витрачає ліміти)', checked: flags.autoFix, onChange: (v) => { flags.autoFix = v; } }),
-      Toggle({ label: 'Автовідповіді — на питання агентів (план, вибір варіанта, погодження) ШІ відповідає сам найрозумнішим варіантом і записує рішення в задачу; вас питає лише про паролі, ключі, оплати, акаунти, ручні дії та незворотне видалення чи публікацію даних (вмикає автовиправлення)', checked: flags.autoAnswer, onChange: (v) => { flags.autoAnswer = v; } })),
+      Toggle({ label: 'Автовиправлення — коли задача заблокована, ШІ з\'ясовує причину, виправляє задачу й запускає знову або ставить вам просте питання (до 2 разів на задачу, з автовідповідями до 4); сам розв'язує конфлікти злиття й запускає ремонт гілки, якщо після злиття впали перевірки; витрачає ліміти', checked: flags.autoFix, onChange: (v) => { flags.autoFix = v; } }),
+      Toggle({ label: 'Автовідповіді — прийнятий план одразу запускається; на питання агентів (план, вибір варіанта, погодження) ШІ відповідає сам найрозумнішим варіантом і записує рішення в задачу; вас питає лише про паролі, ключі, оплати, акаунти, ручні дії та незворотне видалення чи публікацію даних (вмикає автовиправлення)', checked: flags.autoAnswer, onChange: (v) => { flags.autoAnswer = v; } })),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {
       await api('PATCH', `/api/projects/${p.id}`, { reviewPolicy: { mode: mode.value, provider: prov.value, model: modelValue(model), ...flags } });
       await reloadProject(); toast('Політику рецензії збережено', 'success'); render();
