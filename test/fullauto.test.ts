@@ -70,3 +70,10 @@ test('a diagnosis with unescaped Windows paths in its JSON still parses', async 
   assert.deepEqual(extractJson(raw), { action: 'retry', feedback: String.raw`use C:\Users\x and \d, keep \Server and a` + '\nb' });
   assert.throws(() => extractJson('{"a": }'));
 });
+
+test('auto-fix may give a task that must edit files a writable role', async () => {
+  const { parseAdvice } = await import('../src/doctor.ts');
+  const a = parseAdvice({ action: 'retry', explanation: 'x', changes: { assignedRole: '', policy: 'workspace-write' } });
+  assert.deepEqual(a.changes, { assignedRole: '', policy: 'workspace-write' });
+  assert.deepEqual(parseAdvice({ action: 'retry', explanation: 'x', changes: { assignedRole: 'Boss', policy: 'workspace-write' } }).changes, {}, 'unknown roles are ignored');
+});

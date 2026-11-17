@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Orchestrator } from './orchestrator.ts';
 import { BadRequest, Conflict, type PlanDoc, type PlanRun, type PlanTask, type Project, type Task } from './store.ts';
 import { topoOrder } from './dag.ts';
-import { ROLES, cleanModel, commandDecision } from './contract.ts';
+import { ROLES, cleanModel, commandDecision, roleTemplate } from './contract.ts';
 import type { AgentAdapter } from './adapters/types.ts';
 import { killTree, isAlive, maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent, type OneShot } from './oneshot.ts';
@@ -227,7 +227,9 @@ export class Planner {
       for (const n of order) {
         const t = tasks[n - 1]!;
         const task = this.orch.createTask(plan.projectId, {
-          title: t.title, description: t.description, acceptanceCriteria: t.acceptanceCriteria, assignedRole: t.role,
+          // a read-only role (planner, security reviewer) on a task that must edit files would only ever produce a plan
+          title: t.title, description: t.description, acceptanceCriteria: t.acceptanceCriteria,
+          assignedRole: t.role && t.policy !== 'read-only' && t.allowedPaths.length && roleTemplate(this.orch.roleTemplates(), t.role).readOnly ? '' : t.role,
           dependsOn: t.dependsOn.map((d) => (typeof d === 'number' ? d : ids.get(d)!)),
           allowedPaths: t.allowedPaths, verifyCommands: t.verifyCommands, policy: t.policy, provider, model: o.model ?? null,
           category: t.category ?? null, complexity: t.complexity ?? null,

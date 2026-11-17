@@ -4,6 +4,7 @@
 import path from 'node:path';
 import type { Orchestrator } from './orchestrator.ts';
 import { COMPLEXITIES } from './routing.ts';
+import { ROLES } from './contract.ts';
 import { Conflict, type Task } from './store.ts';
 import { maskSecrets } from './proc.ts';
 import { extractJson, runOnce, resolveReadOnlyAgent } from './oneshot.ts';
@@ -22,7 +23,7 @@ export interface Diagnosis {
 }
 export interface DoctorAdvice {
   action: 'retry' | 'ask_owner' | 'give_up'; explanation: string; question: string; feedback: string;
-  changes: { description?: string; acceptanceCriteria?: string; allowedPaths?: string[]; complexity?: string };
+  changes: { description?: string; acceptanceCriteria?: string; allowedPaths?: string[]; complexity?: string; assignedRole?: string; policy?: string };
   /** Auto-answer: the decisions taken on the owner's behalf, appended to the task description. */
   decisions: string;
 }
@@ -42,6 +43,8 @@ export function parseAdvice(raw: unknown): DoctorAdvice {
     if (paths.every((p) => !/^([a-z]:|[\\/])/i.test(p) && !p.split(/[\\/]/).includes('..'))) changes.allowedPaths = paths.slice(0, 50);
   }
   if ((COMPLEXITIES as readonly string[]).includes(String(c.complexity))) changes.complexity = String(c.complexity);
+  // a task that must edit files but got a read-only role (planner, security reviewer): the auto-fix may change the role
+  if (c.assignedRole === '' || (ROLES as readonly string[]).includes(String(c.assignedRole))) { changes.assignedRole = String(c.assignedRole); if (c.policy === 'workspace-write') changes.policy = 'workspace-write'; }
   const explanation = s(o.explanation, 2000);
   if (!explanation) throw new Error('explanation is missing');
   const question = s(o.question, 4000);
@@ -59,6 +62,7 @@ You are READ-ONLY: do not modify any file. Read the repository as needed (projec
 ## Task
 Title: ${t.title}
 Type / complexity: ${t.category ?? '—'} / ${t.complexity ?? '—'}
+Role: ${t.assignedRole || '(none)'}; file access: ${t.policy === 'read-only' ? 'READ-ONLY — the agents cannot edit files' : 'may edit the allowed paths'}
 Attempts used: ${t.attempts} of ${t.maxAttempts}
 Allowed paths:
 ${list(t.allowedPaths, '- (any file)')}
@@ -105,7 +109,9 @@ Reply with ONLY one JSON object inside a \`\`\`json fenced block:
   "question": "ask_owner only: the questions to the owner, IN UKRAINIAN",
   "feedback": "retry only: instructions for the next attempt",
   "decisions": "decisions taken on the owner's behalf, one per line with its reason (auto-answer only)",
-  "changes": { "description": "…", "acceptanceCriteria": "…", "allowedPaths": ["…"], "complexity": "low|medium|high" } }
+  "changes": { "description": "…", "acceptanceCriteria": "…", "allowedPaths": ["…"], "complexity": "low|medium|high",
+    "assignedRole": "only if the role is wrong: one of ${ROLES.join(', ')}, or \"\" for none (read-only roles cannot edit files)",
+    "policy": "workspace-write — only together with assignedRole, when the task must edit files" } }
 `;
 }
 
