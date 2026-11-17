@@ -79,7 +79,7 @@ test('OpenAI-compatible API agent (Codex/Gemini fallback): read-only policy has 
   assert.equal(api.bodies[0]!.reasoning_effort, 'medium');
   assert.deepEqual(api.bodies[0]!.tools.map((t: Body) => t.function.name), ['list_files', 'read_file']);
   assert.match(api.bodies[1]!.messages.at(-1).content, /unknown tool write_file/);
-  assert.deepEqual(ev.at(-1), { type: 'result', ok: true, text: 'Reviewed.', usage: { input_tokens: 30, output_tokens: 10 } });
+  assert.deepEqual(ev.at(-1), { type: 'result', ok: true, text: 'Reviewed.', usage: { input_tokens: 30, output_tokens: 10, billing: 'api' } });
 });
 
 test('CLI first, API second: API only when the CLI is missing, the key is set and paid API is allowed', async (t) => {

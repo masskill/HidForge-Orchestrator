@@ -384,8 +384,8 @@ function overviewPage() {
       StatCard({ label: 'Потребують уваги', value: count(ATTENTION), tone: 'warning', hint: 'рев\'ю та запитання' }),
       StatCard({ label: 'Злито', value: count(['merged']), tone: 'success' }),
       StatCard({ label: 'Проблеми', value: count(PROBLEM), tone: count(PROBLEM) ? 'danger' : undefined, hint: 'помилка / заблоковано' }),
-      StatLink({ href: '#/costs', label: 'Витрати', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd <= 0 ? 'danger' : undefined,
-        hint: state.costs?.budgetUsd != null ? `бюджет ${usd(state.costs.budgetUsd)}, лишилось ${usd(state.costs.remainingUsd)}` : 'бюджет не задано' })),
+      StatLink({ href: '#/costs', label: 'Оплачено через API', value: usd(state.costs?.totalUsd), tone: state.costs?.budgetUsd != null && state.costs.remainingUsd <= 0 ? 'danger' : undefined,
+        hint: state.costs?.subscriptionUsd ? `підписка: ≈ ${usd(state.costs.subscriptionUsd)} за цінами API, не списується` : state.costs?.budgetUsd != null ? `бюджет ${usd(state.costs.budgetUsd)}, лишилось ${usd(state.costs.remainingUsd)}` : 'працює за підписками' })),
     chat.panel,
     h('div', { class: 'grid cols-2' },
       PanelCard({ title: 'Ціль проєкту', subtitle: 'З неї AI-планер будує план задач' },
@@ -409,11 +409,12 @@ function overviewPage() {
 function costsPanel() {
   const c = state.costs;
   if (!c || !c.byProvider.length) return null;
-  return PanelCard({ flush: true, title: 'Витрати за агентами', subtitle: 'Долари звітує лише Claude Code; інші CLI — тільки токени' }, Table({
+  return PanelCard({ flush: true, title: 'Витрати за агентами', subtitle: '«Оплачено» — лише платні API-запити. «Оцінка підписки» — скільки це коштувало б за цінами API (звітує Claude Code); з підписки гроші не списуються' }, Table({
     columns: [
       { label: 'Агент', render: (x) => (x.provider === 'mock' ? h('span', { class: 'mockflag' }, 'MOCK') : x.provider) },
       { label: 'Сесій', render: (x) => h('span', { class: 'mono' }, x.sessions) },
-      { label: 'USD', render: (x) => h('span', { class: 'mono' }, x.sessionsWithUsd ? usd(x.usd) : '—') },
+      { label: 'Оплачено', render: (x) => h('span', { class: 'mono' }, x.sessionsWithUsd ? usd(x.usd) : '—') },
+      { label: 'Оцінка підписки', render: (x) => h('span', { class: 'mono muted' }, x.estUsd ? `≈ ${usd(x.estUsd)}` : '—') },
       { label: 'Токени вводу', render: (x) => h('span', { class: 'mono' }, x.inputTokens.toLocaleString('uk-UA')) },
       { label: 'Токени виводу', render: (x) => h('span', { class: 'mono' }, x.outputTokens.toLocaleString('uk-UA')) },
     ], rows: c.byProvider }));
@@ -659,19 +660,20 @@ function costsPage() {
     PageHeader({ title: 'Витрати', subtitle: 'Витрати, токени, сесії агентів і бюджет проєкту', meta: projectMeta(p),
       actions: SecondaryButton({ icon: 'refresh', onClick: act(async () => { await reloadProject(); render(); }) }, 'Оновити') }),
     h('div', { class: 'grid stats' },
-      StatCard({ label: 'Витрачено', value: c ? usd(c.totalUsd) : '—' }),
+      StatCard({ label: 'Оплачено через API', value: c ? usd(c.totalUsd) : '—', hint: 'реальні гроші; без ключів API завжди $0' }),
+      StatCard({ label: 'Підписка (оцінка)', value: c ? `≈ ${usd(c.subscriptionUsd ?? 0)}` : '—', hint: 'стільки коштувало б через API; не списується' }),
       StatCard({ label: 'Бюджет', value: budget == null ? 'не задано' : usd(budget) }),
       StatCard({ label: 'Лишилось', value: budget == null ? '—' : remaining == null ? '—' : usd(remaining),
         tone: budget != null && remaining != null && remaining <= 0 ? 'danger' : undefined }),
       StatCard({ label: 'Сесій усього', value: c ? sessions : '—' })),
-    PanelCard({ title: 'Розподіл за видом', subtitle: 'Звітовані витрати у USD' },
+    PanelCard({ title: 'Розподіл за видом', subtitle: 'Оплачені API-запити у USD' },
       c ? InfoList([
         ['Задачі', usd(c.byKind?.task)],
         ['AI-планер', usd(c.byKind?.planner)],
         ['AI-рецензії', usd(c.byKind?.review)],
       ]) : h('p', { class: 'muted' }, 'Не вдалося завантажити розподіл витрат.')),
     h('p', { class: 'text-2', style: 'margin:0' },
-      'Важливо: USD-витрати звітує лише Claude Code. Інші CLI повідомляють тільки про токени, тому фактичні витрати можуть бути вищими.'),
+      'Поки CLI встановлені й ви в них увійшли, HidForge працює лише за підписками — гроші не списуються, витрачаються ліміти підписок. Платні API-запити можливі лише з ключем у .env і ввімкненим перемикачем у Налаштуваннях (зараз — лише якщо CLI немає). Бюджет проєкту рахує тільки оплачені запити.'),
     !c ? PanelCard({}, EmptyState({ icon: 'alert', title: 'Дані витрат недоступні',
       text: 'Перевірте сервер і натисніть «Оновити».' }))
       : sessions ? costsPanel() : PanelCard({}, EmptyState({ icon: 'costs', title: 'Сесій ще немає',
@@ -749,7 +751,7 @@ async function modelsPage() {
         { label: 'Рецензій «схвалено»', render: (r) => (r.reviewed ? `${r.approved} з ${r.reviewed}` : '—') },
         { label: 'Сер. час', render: (r) => `${Math.round(r.avgSec)} с` },
         { label: 'Токени', render: (r) => (r.inputTokens + r.outputTokens).toLocaleString('uk-UA') },
-        { label: 'USD', render: (r) => (r.runsWithUsd ? usd(r.usd) : '—') },
+        { label: '≈ USD за цінами API', render: (r) => (r.runsWithUsd ? usd(r.usd) : '—') },
       ], rows }))
       : PanelCard({}, EmptyState({ icon: 'overview', title: 'Вимірів ще немає', text: 'Статистика з’явиться після запусків задач із заданим типом. Доти діє таблиця пріоритетів із досліджень (Налаштування → Автовибір моделі).' })),
     h('p', { class: 'text-2', style: 'margin:0' },
@@ -1413,7 +1415,7 @@ function routingSettings() {
 function budgetSettings(p) {
   const budget = TextInput({ type: 'number', min: 0.01, step: 0.01, value: p.budgetUsd ?? '', placeholder: 'без ліміту' });
   const c = state.costs;
-  return PanelCard({ title: 'Бюджет проєкту', subtitle: `Витрачено ${usd(c?.totalUsd)}${p.budgetUsd != null ? ` з ${usd(p.budgetUsd)}` : ''}` },
+  return PanelCard({ title: 'Бюджет проєкту (платні API)', subtitle: `Оплачено ${usd(c?.totalUsd)}${p.budgetUsd != null ? ` з ${usd(p.budgetUsd)}` : ''}; робота за підпискою бюджет не витрачає` },
     h('p', { class: 'text-2', style: 'margin:0' }, 'Коли сума звітованих витрат (задачі, планер, рецензії) досягає бюджету, HidForge не запускає нових задач. Долари звітує лише Claude Code; витрати інших CLI не враховуються в сумі.'),
     Field('Бюджет, $', budget, 'порожньо — без ліміту'),
     h('div', {}, PrimaryButton({ icon: 'check', onClick: act(async () => {

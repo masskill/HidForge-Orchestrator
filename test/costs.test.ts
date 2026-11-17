@@ -36,11 +36,16 @@ test('model lists are parsed from the CLI output formats', () => {
     [{ id: 'auto', label: 'Auto (default)' }, { id: 'gpt-5.3-codex', label: 'Codex 5.3' }]);
 });
 
-test('project budget: spend is summed from reported costs and stops new runs once exhausted', async () => {
+test('project budget: only paid API spend counts and stops new runs once exhausted; a subscription estimate is shown apart', async () => {
   const { orch, project } = await setup();
   try {
     orch.store.updateProject(project.id, { budgetUsd: 0.05 });
-    const a = orch.createTask(project.id, { title: 'A', allowedPaths: ['a/**'], description: mock({ costUsd: 0.06, write: { 'a/a.txt': 'A' } }) });
+    const s = orch.createTask(project.id, { title: 'S', allowedPaths: ['s/**'], description: mock({ costUsd: 6.1, write: { 's/s.txt': 'S' } }) });
+    orch.submit(s.id);
+    await waitStatus(orch, s.id, ['review']);
+    const sub = projectCosts(orch.store, project.id);
+    assert.deepEqual([sub.totalUsd, sub.subscriptionUsd, sub.remainingUsd], [0, 6.1, 0.05], 'a subscription run costs no money and no budget');
+    const a = orch.createTask(project.id, { title: 'A', allowedPaths: ['a/**'], description: mock({ costUsd: 0.06, paid: true, write: { 'a/a.txt': 'A' } }) });
     orch.submit(a.id);
     await waitStatus(orch, a.id, ['review']);
     const c = projectCosts(orch.store, project.id);
@@ -88,9 +93,10 @@ test('costs/budget/models HTTP API', async () => {
 });
 
 test('usage tokens are read from snake_case and camelCase (Cursor) reports', () => {
-  assert.deepEqual(usageTokens({ inputTokens: 10, outputTokens: 4, cacheReadTokens: 5, cacheWriteTokens: 1, reasoningTokens: 3 }), { input: 16, output: 4, usd: null });
-  assert.deepEqual(usageTokens({ input_tokens: 2, cache_read_input_tokens: 3, output_tokens: 1, total_cost_usd: 0.01 }), { input: 5, output: 1, usd: 0.01 });
-  assert.deepEqual(usageTokens(null), { input: 0, output: 0, usd: null });
+  assert.deepEqual(usageTokens({ inputTokens: 10, outputTokens: 4, cacheReadTokens: 5, cacheWriteTokens: 1, reasoningTokens: 3 }), { paid: false, input: 16, output: 4, usd: null });
+  assert.deepEqual(usageTokens({ input_tokens: 2, cache_read_input_tokens: 3, output_tokens: 1, total_cost_usd: 0.01 }), { paid: false, input: 5, output: 1, usd: 0.01 });
+  assert.deepEqual(usageTokens(null), { paid: false, input: 0, output: 0, usd: null });
+  assert.equal(usageTokens({ total_cost_usd: 1, billing: 'api' }).paid, true);
 });
 
 test('project runs: newest first with task title, duration, cost; paging and filters', async () => {

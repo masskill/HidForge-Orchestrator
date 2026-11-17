@@ -83,7 +83,7 @@ async function anthropic(prompt: string) {
     for (const k of Object.keys(usage) as (keyof typeof usage)[]) usage[k] += r.usage[k] ?? 0;
     const text = r.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n').trim();
     if (text) { last = text; out({ type: 'message', text }); }
-    const done = (ok: boolean, t: string) => out({ type: 'result', ok, text: t, usage: { ...usage, ...(usd() !== undefined ? { total_cost_usd: usd() } : {}) } });
+    const done = (ok: boolean, t: string) => out({ type: 'result', ok, text: t, usage: { ...usage, billing: 'api', ...(usd() !== undefined ? { total_cost_usd: usd() } : {}) } });
     if (r.stop_reason === 'refusal') return done(false, `model refused: ${r.stop_details?.category ?? 'unknown'}`);
     if (r.stop_reason === 'max_tokens') return done(false, 'response hit max_tokens');
     if (r.stop_reason !== 'tool_use') return done(true, last);
@@ -96,7 +96,7 @@ async function anthropic(prompt: string) {
     messages.push({ role: 'user', content: results });
     if (maxUsd && (usd() ?? 0) > maxUsd) return done(false, `stopped: estimated cost $${usd()!.toFixed(2)} exceeded the task budget $${maxUsd}`);
   }
-  return out({ type: 'result', ok: false, text: `stopped after ${MAX_TURNS} turns`, usage });
+  return out({ type: 'result', ok: false, text: `stopped after ${MAX_TURNS} turns`, usage: { ...usage, billing: 'api' } });
 }
 
 // ---------------------------------------------------------------- OpenAI-compatible chat completions (OpenAI, Gemini)
@@ -123,7 +123,7 @@ async function compat(vendor: string, prompt: string) {
     usage.output_tokens += j.usage?.completion_tokens ?? 0;
     const m = j.choices[0]!.message;
     if (m.content?.trim()) { last = m.content.trim(); out({ type: 'message', text: last }); }
-    if (!m.tool_calls?.length) return out({ type: 'result', ok: j.choices[0]!.finish_reason !== 'length', text: last, usage });
+    if (!m.tool_calls?.length) return out({ type: 'result', ok: j.choices[0]!.finish_reason !== 'length', text: last, usage: { ...usage, billing: 'api' } });
     // DeepSeek, MiniMax and Kimi thinking models require their reasoning_content back after tool calls.
     messages.push({ role: 'assistant', content: m.content ?? null, tool_calls: m.tool_calls, ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}) });
     for (const tc of m.tool_calls) {
@@ -132,7 +132,7 @@ async function compat(vendor: string, prompt: string) {
       messages.push({ role: 'tool', tool_call_id: tc.id, content: call(tc.function.name, input).text });
     }
   }
-  return out({ type: 'result', ok: false, text: `stopped after ${MAX_TURNS} turns`, usage });
+  return out({ type: 'result', ok: false, text: `stopped after ${MAX_TURNS} turns`, usage: { ...usage, billing: 'api' } });
 }
 
 let prompt = '';

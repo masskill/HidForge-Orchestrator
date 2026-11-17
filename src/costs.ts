@@ -1,17 +1,21 @@
 // Spend accounting from what the CLIs report: task runs, planner sessions and AI reviews.
-// Only Claude Code reports a dollar cost (total_cost_usd); other CLIs report tokens only.
+// Real money is only what HidForge's own API agents spent (usage.billing = 'api': paid API fallback / API-only providers).
+// Claude Code reports total_cost_usd on every run, also under a subscription: there it is an estimate at API prices, nothing
+// is charged — it is shown apart as subscriptionUsd and never counts against the project budget.
 import type { Store } from './store.ts';
 import type { LinkStat } from './routing.ts';
 
-export interface ProviderCost { provider: string; sessions: number; usd: number; sessionsWithUsd: number; inputTokens: number; outputTokens: number }
-export interface CostSummary { totalUsd: number; budgetUsd: number | null; remainingUsd: number | null; byProvider: ProviderCost[]; byKind: Record<string, number> }
+export interface ProviderCost { provider: string; sessions: number; usd: number; sessionsWithUsd: number; estUsd: number; inputTokens: number; outputTokens: number }
+/** totalUsd = money actually paid (API); subscriptionUsd = what subscription runs would have cost at API prices. */
+export interface CostSummary { totalUsd: number; subscriptionUsd: number; budgetUsd: number | null; remainingUsd: number | null; byProvider: ProviderCost[]; byKind: Record<string, number> }
 
 type Usage = Record<string, unknown> | null | undefined;
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 /** Tokens in/out from any CLI's usage: snake_case (Claude, Codex, agy, plugins) or camelCase (Cursor). */
-export function usageTokens(u: Usage): { input: number; output: number; usd: number | null } {
+export function usageTokens(u: Usage): { paid: boolean; input: number; output: number; usd: number | null } {
   return {
+    paid: u?.billing === 'api',
     input: n(u?.input_tokens) + n(u?.cache_creation_input_tokens) + n(u?.cache_read_input_tokens) + n(u?.cached_input_tokens) + n(u?.cache_read_tokens)
       + n(u?.inputTokens) + n(u?.cacheReadTokens) + n(u?.cacheWriteTokens),
     output: n(u?.output_tokens) + n(u?.thinking_tokens) + n(u?.outputTokens), // reasoningTokens: may already be in outputTokens, not added
@@ -23,10 +27,11 @@ export function projectCosts(store: Store, projectId: number): CostSummary {
   const map = new Map<string, ProviderCost>();
   const byKind: Record<string, number> = { task: 0, planner: 0, review: 0 };
   const add = (provider: string, kind: string, u: Usage) => {
-    const c = map.get(provider) ?? { provider, sessions: 0, usd: 0, sessionsWithUsd: 0, inputTokens: 0, outputTokens: 0 };
+    const c = map.get(provider) ?? { provider, sessions: 0, usd: 0, sessionsWithUsd: 0, estUsd: 0, inputTokens: 0, outputTokens: 0 };
     c.sessions++;
     const t = usageTokens(u);
-    if (t.usd !== null) { c.usd += t.usd; c.sessionsWithUsd++; byKind[kind] = (byKind[kind] ?? 0) + t.usd; }
+    if (t.usd !== null && t.paid) { c.usd += t.usd; c.sessionsWithUsd++; byKind[kind] = (byKind[kind] ?? 0) + t.usd; }
+    else if (t.usd !== null) c.estUsd += t.usd;
     c.inputTokens += t.input;
     c.outputTokens += t.output;
     map.set(provider, c);
@@ -38,10 +43,11 @@ export function projectCosts(store: Store, projectId: number): CostSummary {
   }
   for (const p of store.listPlans(projectId, 100_000)) add(p.provider, 'planner', p.usage as Usage);
   const totalUsd = [...map.values()].reduce((a, c) => a + c.usd, 0);
+  const subscriptionUsd = [...map.values()].reduce((a, c) => a + c.estUsd, 0);
   const budgetUsd = store.getProject(projectId).budgetUsd;
   return {
-    totalUsd, budgetUsd, remainingUsd: budgetUsd == null ? null : Math.max(0, budgetUsd - totalUsd),
-    byProvider: [...map.values()].sort((a, b) => b.usd - a.usd || b.sessions - a.sessions), byKind,
+    totalUsd, subscriptionUsd, budgetUsd, remainingUsd: budgetUsd == null ? null : Math.max(0, budgetUsd - totalUsd),
+    byProvider: [...map.values()].sort((a, b) => b.usd - a.usd || b.estUsd - a.estUsd || b.sessions - a.sessions), byKind,
   };
 }
 

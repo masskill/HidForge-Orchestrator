@@ -9,7 +9,7 @@ import path from 'node:path';
 interface Directive {
   sleepMs?: number; steps?: number; write?: Record<string, string>;
   exit?: number; mode?: 'ok' | 'hang' | 'crash' | 'noresult';
-  failAttempts?: number; hangAttempts?: number; grandchild?: boolean; echoArgs?: boolean; costUsd?: number;
+  failAttempts?: number; hangAttempts?: number; grandchild?: boolean; echoArgs?: boolean; costUsd?: number; paid?: boolean; // paid: the cost is real money (as from an API agent)
   /** Models (the --model argument) that answer with a usage-limit error, exit 1; limitText overrides the message. */
   limitModels?: string[]; limitText?: string;
   plan?: unknown; planRaw?: string; // planner-mode overrides
@@ -103,7 +103,7 @@ async function main() {
     out({ type: 'tool', text: `wrote ${rel}` });
   }
   if ((d.failAttempts ?? 0) >= attempt) { out({ type: 'result', ok: false, text: 'simulated failure' }); process.exit(1); }
-  if (d.mode !== 'noresult') out({ type: 'result', ok: true, text: 'done', usage: { input_tokens: 0, output_tokens: 0, ...(d.costUsd ? { total_cost_usd: d.costUsd } : {}) } });
+  if (d.mode !== 'noresult') out({ type: 'result', ok: true, text: 'done', usage: { input_tokens: 0, output_tokens: 0, ...(d.costUsd ? { total_cost_usd: d.costUsd } : {}), ...(d.paid ? { billing: 'api' } : {}) } });
   process.exit(d.exit ?? 0);
 }
 
