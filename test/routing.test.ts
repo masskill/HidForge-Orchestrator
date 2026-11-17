@@ -175,3 +175,16 @@ test('usage limit: the agent is paused, the attempt is not counted, the next lin
     assert.equal((await orch.registry.status()).find((s) => s.id === 'claude')!.available, true);
   } finally { await orch.stop(); }
 });
+
+test('after the owner answers, the chain starts over from the primary link', async () => {
+  const { orch, project } = await setup({ adapters: [new MockAdapter(), new Fake('claude'), new Fake('codex'), new Fake('agy')] });
+  try {
+    const t = orch.createTask(project.id, { title: 'ask', provider: 'auto', category: 'backend', complexity: 'medium', allowedPaths: ['k/**'],
+      description: mock({ ask: 'Так?', write: { 'k/k.txt': 'K' } }) });
+    orch.submit(t.id);
+    await waitStatus(orch, t.id, ['blocked']);
+    orch.answerOwner(t.id, 'так');
+    await waitStatus(orch, t.id, ['review']);
+    assert.deepEqual(orch.store.runsForTask(t.id).map((r) => r.provider), ['codex', 'codex'], 'not escalated to fallback 1');
+  } finally { await orch.stop(); }
+});

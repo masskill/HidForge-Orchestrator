@@ -148,7 +148,7 @@ export class Orchestrator {
     const description = `${t.description}\n\n## Owner's answer (${new Date().toISOString().slice(0, 16).replace('T', ' ')})\nQuestion: ${t.question}\nAnswer: ${a}`;
     this.store.addEvidence(id, { kind: 'human-review', ok: true, summary: `Owner answered: ${a.slice(0, 300)}` });
     return this.store.setStatus(id, 'queued', { description, question: null, notBefore: null, feedback: `The owner answered your question (see "Owner's answer" in the description). Continue the task now.`,
-      maxAttempts: Math.max(t.maxAttempts, t.attempts + 2), artifacts: { ...t.artifacts, ownerQuestion: undefined, autoFixExhausted: undefined } }, 'owner answered');
+      maxAttempts: Math.max(t.maxAttempts, t.attempts + 2), artifacts: { ...t.artifacts, ownerQuestion: undefined, autoFixExhausted: undefined, chainFrom: t.attempts } }, 'owner answered');
   }
 
   /** Apply the project's automation to tasks already waiting: review/merge what passed its gates, diagnose what is stuck. */
@@ -526,12 +526,13 @@ export class Orchestrator {
       const write = t.policy !== 'read-only' && !tpl.readOnly;
       const chain = t.category ? await this.chainFor(t.category, t.complexity, { write, roleProviders: tpl.providers }) : [];
       if (chain.length) {
-        const i = Math.min(t.attempts, chain.length - 1);
+        // after the owner's answer or an auto-fix the chain starts over: those failures were not the model's fault
+        const i = Math.min(Math.max(0, t.attempts - Number(t.artifacts.chainFrom ?? 0)), chain.length - 1);
         const l = chain[i]!;
         const flag = effortFlagFor(l) === null ? null : (t.effort ?? l.effort); // an effort the human wrote into the task wins over the table
         used = { provider: l.agent, model: l.model, effort: flag ?? l.effort, flag };
         this.store.event({ projectId: t.projectId, taskId: t.id, type: 'task.routed', data: { provider: l.agent, model: l.model, effort: used.effort,
-          category: t.category, complexity: t.complexity ?? 'medium', link: i + 1, of: chain.length, reason: i ? `attempt ${t.attempts + 1}: escalated to link ${i + 1}` : 'primary link' } });
+          category: t.category, complexity: t.complexity ?? 'medium', link: i + 1, of: chain.length, reason: i ? `attempt ${t.attempts + 1}: escalated to link ${i + 1}` : t.artifacts.chainFrom ? 'primary link (chain restarted after an owner answer or auto-fix)' : 'primary link' } });
       } else {
         const table = this.store.getSetting('routingTable', DEFAULT_ROUTING);
         const ro = write ? this.readOnlyAgents() : new Set<string>();

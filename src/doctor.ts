@@ -203,7 +203,7 @@ export class Doctor {
     const t = store.getTask(id);
     if (a.action === 'retry') {
       store.setStatus(id, 'queued', { feedback: a.feedback || t.feedback, question: null, notBefore: null, maxAttempts: Math.max(t.maxAttempts, t.attempts + 2),
-        artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: undefined } }, 'auto-fix: retry');
+        artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: undefined, chainFrom: t.attempts } }, 'auto-fix: retry');
     } else if (a.action === 'ask_owner') {
       store.patchTask(id, { question: a.question, artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: true } });
       store.event({ projectId: t.projectId, taskId: id, type: 'task.question', data: { question: a.question } });
