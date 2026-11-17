@@ -616,7 +616,18 @@ export class Orchestrator {
     let w: Awaited<ReturnType<WorkspaceManager['ensure']>>;
     try {
       w = await this.ws.ensure(p.repoPath, p.baseBranch, p.id, t.id, t.workspace);
-    } catch (e) { this.failTask(t, `workspace error: ${(e as Error).message}`); return false; }
+    } catch (e) {
+      const msg = (e as Error).message;
+      // two git processes on one repository (a merge removing a branch while a worktree is added): Windows refuses access
+      // for a moment. Try again shortly; no attempt was used.
+      const n = Number(t.artifacts.workspaceRetries ?? 0);
+      if (n < 5 && /permission denied|unable to access|\.lock|resource busy|being used by another process/i.test(msg)) {
+        this.store.patchTask(t.id, { notBefore: new Date(Date.now() + 5_000 * (n + 1)).toISOString(), artifacts: { ...t.artifacts, workspaceRetries: n + 1 } });
+        this.store.event({ projectId: p.id, taskId: t.id, type: 'task.waiting', data: { why: `repository busy, retrying: ${msg.slice(0, 300)}` } });
+        return false;
+      }
+      this.failTask(t, `workspace error: ${msg}`); return false;
+    }
     t = this.store.patchTask(t.id, { workspace: w.workspace, branch: w.branch, baseCommit: w.created ? w.baseCommit : (t.baseCommit ?? w.baseCommit) });
     // a repair attempt works on the current base: fixes merged meanwhile (an Integrator, other tasks) are brought in first
     const baseMoved = !w.created && t.baseCommit && (await git(p.repoPath, ['rev-parse', p.baseBranch])).stdout.trim() !== t.baseCommit;

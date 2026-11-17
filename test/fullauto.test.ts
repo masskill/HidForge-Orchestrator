@@ -77,3 +77,18 @@ test('auto-fix may give a task that must edit files a writable role', async () =
   assert.deepEqual(a.changes, { assignedRole: '', policy: 'workspace-write' });
   assert.deepEqual(parseAdvice({ action: 'retry', explanation: 'x', changes: { assignedRole: 'Boss', policy: 'workspace-write' } }).changes, {}, 'unknown roles are ignored');
 });
+
+test('a repository that is busy for a moment does not fail the task', async () => {
+  const { orch, project } = await setup();
+  try {
+    const real = orch.ws.ensure.bind(orch.ws);
+    let calls = 0;
+    orch.ws.ensure = async (...a: Parameters<typeof real>) => { if (++calls === 1) throw new Error("warning: unable to access '.git/config': Permission denied"); return real(...a); };
+    const t = orch.createTask(project.id, { title: 'busy', provider: 'mock', allowedPaths: ['w/**'], description: mock({ write: { 'w/w.txt': 'W' } }) });
+    orch.submit(t.id);
+    const r = await waitStatus(orch, t.id, ['review', 'failed'], 30_000);
+    assert.equal(r.status, 'review');
+    assert.equal(r.attempts, 1);
+    assert.equal(calls, 2);
+  } finally { await orch.stop(); }
+});
