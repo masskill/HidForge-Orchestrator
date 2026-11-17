@@ -727,11 +727,11 @@ export class Orchestrator {
     let t = this.store.getTask(id);
     if (t.status !== 'review' || !t.workspace || !t.baseCommit) return;
     const p = this.store.getProject(t.projectId);
-    const fail = (reason: string, retryable = true) => {
+    const fail = (reason: string, retryable = true, feedback = reason) => {
       this.store.addEvidence(id, { kind: 'gate', ok: false, summary: reason });
       t = this.store.patchTask(id, { artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: false, reason } } });
-      if (retryable && t.attempts < t.maxAttempts) this.store.setStatus(id, 'queued', { feedback: reason }, 'gate failed, repair attempt');
-      else this.store.setStatus(id, 'blocked', { feedback: reason }, 'gate failed, needs a human decision');
+      if (retryable && t.attempts < t.maxAttempts) this.store.setStatus(id, 'queued', { feedback }, 'gate failed, repair attempt');
+      else this.store.setStatus(id, 'blocked', { feedback }, 'gate failed, needs a human decision');
     };
     try {
       await this.ws.commitAll(t.workspace, `HidForge task #${t.id} attempt ${t.attempts}: ${t.title}`);
@@ -766,7 +766,8 @@ export class Orchestrator {
         }
         const r = await this.runVerify(cmd, t.workspace, this.verifyEnv(p));
         this.store.addEvidence(id, { kind: 'verify', ok: r.code === 0, summary: `${cmd} -> exit ${r.code}`, detail: r.out });
-        if (r.code !== 0) return fail(`verification failed: ${cmd} (exit ${r.code})`);
+        // the next attempt sees what failed: the agent often cannot run the check itself (no permission in headless mode)
+        if (r.code !== 0) return fail(`verification failed: ${cmd} (exit ${r.code})`, true, verifyFeedback(cmd, r));
       }
       this.store.patchTask(id, { feedback: null, artifacts: { ...this.store.getTask(id).artifacts, gate: { passed: true, at: new Date().toISOString() } } });
       const mode = p.reviewPolicy.mode;
@@ -821,4 +822,11 @@ export class Orchestrator {
       else this.store.setStatus(t.id, 'blocked', {}, 'merge was interrupted by restart; retry approve');
     }
   }
+}
+
+/** Feedback for the repair attempt after a failed check: the error lines of its (already masked) output, else its tail. */
+export function verifyFeedback(cmd: string, r: { code: number; out: string }): string {
+  const errors = r.out.split('\n').filter((l) => /error|fail|✖|×|assert|expected|not ok/i.test(l) && !/ELIFECYCLE/.test(l)).slice(0, 60).join('\n');
+  return `verification failed: ${cmd} (exit ${r.code}). HidForge runs this check after your attempt; you may not be able to run it yourself.\n`
+    + `Its output${errors ? ' (error lines)' : ' (last lines)'}:\n${(errors || r.out.slice(-4000)).slice(0, 6000)}`;
 }
