@@ -186,5 +186,13 @@ test('after the owner answers, the chain starts over from the primary link', asy
     orch.answerOwner(t.id, 'так');
     await waitStatus(orch, t.id, ['review']);
     assert.deepEqual(orch.store.runsForTask(t.id).map((r) => r.provider), ['codex', 'codex'], 'not escalated to fallback 1');
+    // a manual retry of a failed task also starts over from the primary link
+    const f = orch.createTask(project.id, { title: 'fail', provider: 'auto', category: 'backend', complexity: 'medium', maxAttempts: 1, allowedPaths: ['f/**'],
+      description: mock({ failAttempts: 1, write: { 'f/f.txt': 'F' } }) });
+    orch.submit(f.id);
+    await waitStatus(orch, f.id, ['failed']);
+    orch.retry(f.id);
+    await waitStatus(orch, f.id, ['review']);
+    assert.deepEqual(orch.store.runsForTask(f.id).map((r) => r.provider), ['codex', 'codex'], 'retry restarts the chain');
   } finally { await orch.stop(); }
 });

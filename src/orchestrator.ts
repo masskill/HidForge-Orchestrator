@@ -374,7 +374,9 @@ export class Orchestrator {
   retry(id: number): Task {
     const t = this.store.getTask(id);
     if (!['failed', 'blocked'].includes(t.status)) throw new Conflict(`cannot retry a ${t.status} task`);
-    return this.store.setStatus(id, 'queued', { maxAttempts: Math.max(t.maxAttempts, t.attempts + 1), notBefore: null }, 'manual retry');
+    // a manual retry starts the agent chain over (otherwise it would keep landing on the last fallback link)
+    return this.store.setStatus(id, 'queued', { maxAttempts: Math.max(t.maxAttempts, t.attempts + 1), notBefore: null,
+      artifacts: { ...t.artifacts, chainFrom: t.attempts } }, 'manual retry');
   }
 
   reject(id: number, feedback: string, retry = true): Task {
