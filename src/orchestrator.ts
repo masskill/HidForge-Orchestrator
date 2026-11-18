@@ -699,12 +699,22 @@ export class Orchestrator {
 
   /** Bring the base branch into the task branch before a conflict-repair attempt. Conflicts are left for the agent. */
   private async rebaseOntoBase(t: Task, p: Project): Promise<Task> {
+    const ws = t.workspace!;
+    // a conflict repair that was interrupted is still open: the agent finishes it first, the base stays where it is
+    if ((await git(ws, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])).code === 0) return t;
+    // work left uncommitted by an interrupted attempt (restart, stop) would make git refuse the merge: keep it as a commit
+    await this.ws.commitAll(ws, `HidForge task #${t.id}: work in progress from an interrupted attempt`);
     const baseTip = (await git(p.repoPath, ['rev-parse', p.baseBranch])).stdout.trim();
-    const r = await git(t.workspace!, ['merge', '--no-edit', p.baseBranch]);
-    const conflicts = (await git(t.workspace!, ['diff', '--name-only', '--diff-filter=U'])).stdout.split('\n').filter(Boolean);
+    const r = await git(ws, ['merge', '--no-edit', baseTip]); // the exact commit: a merge landing meanwhile is not half-counted
+    const conflicts = (await git(ws, ['diff', '--name-only', '--diff-filter=U'])).stdout.split('\n').filter(Boolean);
+    if (r.code !== 0 && !conflicts.length) {
+      // nothing was merged: the base of the comparison must not move, or the base's own new files look like the task's changes
+      this.store.addEvidence(t.id, { kind: 'integration', ok: false, summary: `Updating the task branch from ${p.baseBranch} failed; it continues on its current base`, detail: `${r.stdout}\n${r.stderr}`.slice(-2000) });
+      return this.store.patchTask(t.id, { artifacts: { ...t.artifacts, needsRebase: false } });
+    }
     const feedback = conflicts.length
       ? `The base branch was merged into your branch and these files contain git conflict markers (<<<<<<< ======= >>>>>>>). Resolve them, keeping both sides' intent: ${conflicts.join(', ')}`
-      : (r.code === 0 ? t.feedback : `Updating from base failed: ${r.stderr.slice(0, 500)}`);
+      : t.feedback;
     this.store.addEvidence(t.id, { kind: 'integration', ok: conflicts.length === 0, summary: conflicts.length ? `Base merged into task branch; conflicts: ${conflicts.join(', ')}` : 'Base merged into task branch cleanly' });
     const artifacts = { ...t.artifacts, needsRebase: false, conflictFiles: conflicts };
     return this.store.patchTask(t.id, { baseCommit: baseTip, feedback, artifacts });
