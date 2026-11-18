@@ -93,7 +93,7 @@ read-only запуск агента (`runOnce`) у тимчасовому `git w
 
 ## Запуск, встановлення, оновлення
 - `src/main.ts --open` відкриває UI у браузері за замовчуванням (`explorer.exe <url>` на Windows, без shell). Перед стартом оркестратора `main.ts` перевіряє `GET /api/version` на своєму порту: якщо там уже HidForge, другий процес лише відкриває браузер і завершується — два оркестратори на одних даних не запускаються.
-- `scripts/HidForge.vbs` — запуск без вікна (WSH `Run …, 0`), вивід у `%LOCALAPPDATA%\HidForge\hidforge.log`; `POST /api/shutdown` (з токеном) — коректна зупинка з UI.
+- `scripts/HidForge.vbs` — запуск без вікна (WSH `Run …, 0`), вивід у `%LOCALAPPDATA%\HidForge\hidforge.log`; `POST /api/shutdown` (з токеном) — коректна зупинка з UI. Сервер запускає сторож `scripts/supervise.ts`. Якщо сервер зупинився несподівано (код ≠ 0: вбитий ззовні або аварія), сторож запускає його знову з паузою; після 5 таких зупинок за 10 хв він здається. Коректна зупинка (код 0) завершує й сторожа. Запуск і вихід пишуться в журнал з часом і pid. Спроба, яку перервав перезапуск, не зараховується.
 - `scripts/install.ps1` — ярлики користувача на `wscript.exe HidForge.vbs`; `scripts/update.ps1` — `git fetch` + `merge --ff-only`, `npm install` лише якщо є `node_modules` (для роботи залежності не потрібні).
 
 ## JSON-плагіни агентів і WSL2 (`src/adapters/plugin.ts`, `src/adapters/wsl.ts`)

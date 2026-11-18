@@ -857,7 +857,11 @@ export class Orchestrator {
       this.store.endRun(r.id, 'interrupted', { error: 'orchestrator restarted while the worker was running' });
       if (t.workspace) this.store.releaseLock(t.workspace);
       this.store.event({ projectId: t.projectId, taskId: t.id, runId: r.id, type: 'run.recovered', data: { pid: r.pid, killed: Boolean(r.pid && young) } });
-      if (t.status === 'running') this.failOrRetry(t, 'interrupted by orchestrator restart');
+      // a restart is not the agent's fault: the attempt is not counted and the task goes straight back to the queue
+      if (t.status === 'running') {
+        this.store.addEvidence(t.id, { kind: 'scheduler', ok: true, summary: `Attempt ${t.attempts} was interrupted by a restart of HidForge; it is not counted, the work so far stays in the worktree` });
+        this.store.setStatus(t.id, 'queued', { attempts: Math.max(0, t.attempts - 1) }, 'interrupted by orchestrator restart');
+      }
     }
     const live = new Set(this.store.liveRuns().map((r) => r.id));
     for (const l of this.store.locks()) if (!live.has(l.runId)) this.store.releaseLock(l.workspace);

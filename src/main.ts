@@ -49,19 +49,21 @@ if (flag('--demo')) {
   const p = await createDemo(orch);
   console.log(`Demo project created: ${p.repoPath}`);
 }
-console.log(`HidForge Orchestrator running at http://127.0.0.1:${actual}  (data: ${dataDir})`);
+console.log(`[${new Date().toISOString()}] HidForge Orchestrator running at http://127.0.0.1:${actual}  (data: ${dataDir}, pid ${process.pid})`);
 if (flag('--open')) openBrowser(`http://127.0.0.1:${actual}`);
 
 let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
-  console.log('Stopping…');
+  console.log(`[${new Date().toISOString()}] Stopping…`);
   await srv.close();
   await orch.stop();
   process.exit(0);
 };
 // a bug in background work (auto-fix, review, a timer) is logged; it must not take the whole server down
 process.on('unhandledRejection', (e) => console.error('[background error]', e));
+// the log shows how the server ended; a stop with no such line means it was killed from outside
+process.on('exit', (code) => console.log(`[${new Date().toISOString()}] exit ${code}`));
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

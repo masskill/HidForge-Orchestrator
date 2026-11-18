@@ -24,4 +24,5 @@ If fso.FileExists(logDir & "\hidforge.log") Then
 End If
 On Error GoTo 0
 sh.CurrentDirectory = root
-sh.Run "cmd /c node --env-file-if-exists=.env src\main.ts --open >> """ & logDir & "\hidforge.log"" 2>&1", 0, False
+' The watchdog (scripts\supervise.ts) starts the server again if it stops unexpectedly.
+sh.Run "cmd /c node --env-file-if-exists=.env scripts\supervise.ts --open >> """ & logDir & "\hidforge.log"" 2>&1", 0, False

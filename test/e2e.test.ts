@@ -166,12 +166,14 @@ test('restart: queue and logs survive, orphan worker is killed, no duplicate run
 
   const orch2 = new Orchestrator({ dataDir, tickMs: 40, backoffMs: 0 });
   try {
+    // the interrupted attempt is not counted, so the retry is attempt 1 again: let it finish this time
+    orch2.store.patchTask(t.id, { description: mock({ write: { 's.txt': '{attempt}' } }) });
     await orch2.start();
     await waitFor(() => !isAlive(run1.pid!), 10_000, 'orphan killed');
     const done = await waitStatus(orch2, t.id, ['review']);
     const runs = orch2.store.runsForTask(t.id);
     assert.deepEqual(runs.map((r) => r.status), ['interrupted', 'succeeded']);
-    assert.equal(done.attempts, 2);
+    assert.equal(done.attempts, 1, 'a restart does not use up an attempt');
     assert.ok(orch2.store.events({ taskId: t.id }).length > eventsBefore, 'old events kept, new appended');
     assert.equal(orch2.store.getTask(waiting.id).status, 'ready', 'dependent task still queued after restart');
     assert.equal(orch2.store.liveRuns().length, 0);
