@@ -12,7 +12,7 @@ Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinu
     # the watchdog (scripts\supervise.ts) would start the server again: stop it first
     $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
     if ($parent -and $parent.CommandLine -match 'supervise\.ts') { Stop-Process -Id $parent.ProcessId -Force }
-    Stop-Process -Id $p.ProcessId -Force
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue # may already be gone with the watchdog
   }
 }
 Start-Sleep -Seconds 2
