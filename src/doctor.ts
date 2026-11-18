@@ -133,7 +133,8 @@ export class Doctor {
     const max = maxFixes(store.getProject(t.projectId).reviewPolicy.autoAnswer);
     if (Number(t.artifacts.autoFixes ?? 0) >= max) {
       if (!t.artifacts.autoFixExhausted) {
-        store.patchTask(t.id, { artifacts: { ...t.artifacts, autoFixExhausted: true } });
+        const o = toOwner(t);
+        store.patchTask(t.id, { ...o, artifacts: { ...t.artifacts, ...o.artifacts, autoFixExhausted: true } });
         store.addEvidence(t.id, { kind: 'doctor', ok: false, summary: `Auto-fix already tried ${max} times — the task needs a human decision` });
       }
       return Promise.resolve();
@@ -221,7 +222,10 @@ export class Doctor {
   private apply(id: number, a: DoctorAdvice, meta: { at: string; provider: string; model: string | null }): void {
     const { store } = this.orch;
     const cur = store.getTask(id);
-    if (!['blocked', 'failed'].includes(cur.status)) return; // the owner acted meanwhile
+    if (!['blocked', 'failed'].includes(cur.status)) { // the owner acted meanwhile: keep the advice, act on nothing
+      this.save(id, { status: 'succeeded', ...meta, action: a.action, explanation: a.explanation, changed: [] });
+      return;
+    }
     const autoFixes = Number(cur.artifacts.autoFixes ?? 0) + 1;
     let changed: string[] = [];
     const auto = this.orch.store.getProject(cur.projectId).reviewPolicy.autoAnswer;
@@ -245,9 +249,18 @@ export class Doctor {
       store.patchTask(id, { question: a.question, artifacts: { ...t.artifacts, autoFixes, doctor: d, ownerQuestion: true, ownerOnly: auto || undefined, pendingQuestion: undefined } });
       store.event({ projectId: t.projectId, taskId: id, type: 'task.question', data: { question: a.question } });
     } else {
-      store.patchTask(id, { artifacts: { ...t.artifacts, autoFixes, doctor: d } });
+      const o = toOwner(t);
+      store.patchTask(id, { ...o, artifacts: { ...t.artifacts, ...o.artifacts, autoFixes, doctor: d } });
     }
   }
+}
+
+/** The auto-fix gave up: a question the agent left for auto-answer goes to the owner, so the task page offers an answer box
+ *  (otherwise "retry" only re-asks the same question). */
+function toOwner(t: Task): { question?: string; artifacts: Record<string, unknown> } {
+  const asked = t.artifacts.askedOwner as string[] | undefined;
+  if (t.question || !asked?.length) return { artifacts: {} };
+  return { question: asked.join('\n'), artifacts: { ownerQuestion: true } };
 }
 
 /** "OWNER QUESTION: …" lines an agent leaves when it must not continue without the owner (see the task contract). */

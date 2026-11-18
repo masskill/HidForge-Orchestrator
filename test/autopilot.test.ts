@@ -158,5 +158,16 @@ test('auto-answer: the AI decides the agent\'s question and the task goes on; wa
     assert.equal(kd.artifacts.ownerOnly, true);
     await orch.autopilot(project.id);
     assert.equal(orch.store.getTask(k.id).question, 'Введіть пароль бази в .env', 'not handed back to the AI');
+
+    // the AI gives up on the agent's question: the question goes to the owner (answer box), the auto-fix stops
+    const g = orch.createTask(project.id, { title: 'scope', provider: 'mock', allowedPaths: ['g/**'],
+      description: mock({ ask: 'Робити A чи B?', doctor: { action: 'give_up', explanation: 'Задача суперечить плану.' } }) });
+    orch.submit(g.id);
+    const gd = await waitFor(() => { const x = orch.store.getTask(g.id); return x.question ? x : null; }, 20_000, 'question handed to the owner');
+    assert.equal(gd.question, 'Робити A чи B?');
+    assert.equal(gd.artifacts.ownerQuestion, true);
+    assert.equal((gd.artifacts.doctor as { status: string }).status, 'succeeded');
+    orch.answerOwner(g.id, 'Роби A');
+    assert.match(orch.store.getTask(g.id).description, /Owner's answer[\s\S]*Роби A/);
   } finally { await orch.stop(); }
 });

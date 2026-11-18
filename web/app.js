@@ -917,7 +917,7 @@ function whatHappened(t) {
       doc?.status === 'running' ? Badge('ШІ з\'ясовує причину…', 'info', { live: true }) : null),
     text ? h('div', { class: 'text-2 wrap' }, text) : null,
     doc?.status === 'failed' ? h('div', { class: 'muted wrap', style: 'font-size:var(--fs-sm)' }, `Автовиправлення не вдалося: ${doc.error}`) : null,
-    t.artifacts.autoFixExhausted ? h('div', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Автовиправлення вже пробувало двічі — потрібне ваше рішення: відредагуйте задачу, натисніть «Повторити» або спитайте в чаті.') : null);
+    t.artifacts.autoFixExhausted ? h('div', { class: 'muted', style: 'font-size:var(--fs-sm)' }, 'Автовиправлення вичерпало спроби — потрібне ваше рішення: дайте відповідь, відредагуйте або скасуйте задачу, чи спитайте в чаті.') : null);
 }
 
 function quickActions(t) {
